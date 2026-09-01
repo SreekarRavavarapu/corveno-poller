@@ -21697,13 +21697,17 @@ async function fetchBoard(ats, slug) {
 }
 async function pageAll(table, select, filter) {
   const out = [];
-  for (let from = 0; ; from += 1e3) {
-    let q = supabase.from(table).select(select).range(from, from + 999);
+  let cursor = null;
+  for (; ; ) {
+    let q = supabase.from(table).select(select).order("id", { ascending: true }).limit(1e3);
+    if (cursor) q = q.gt("id", cursor);
     if (filter) q = filter(q);
     const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
-    out.push(...data ?? []);
-    if (!data || data.length < 1e3) break;
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < 1e3) break;
+    cursor = rows[rows.length - 1].id;
   }
   return out;
 }

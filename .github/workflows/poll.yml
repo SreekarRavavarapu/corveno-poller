@@ -1,7 +1,7 @@
 name: Poll job boards
 on:
   schedule:
-    - cron: "*/20 * * * *"   # ~every 20 min (GitHub adds 5-30 min jitter)
+    - cron: "7,27,47 * * * *"   # ~every 20 min (GitHub adds 5-30 min jitter)
   workflow_dispatch: {}
 
 concurrency:

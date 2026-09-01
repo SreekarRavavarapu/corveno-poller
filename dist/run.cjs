@@ -21611,9 +21611,19 @@ function classify(title, structuredType, description) {
   }
   return { kind, terms, grad_year, sponsorship, classify_source: source };
 }
+function clean(s) {
+  const str = String(s ?? "");
+  let out = "";
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c === 0) continue;
+    out += c < 32 && c !== 9 && c !== 10 && c !== 13 ? " " : str[i];
+  }
+  return out;
+}
 function stripHtml(s) {
   if (!s) return null;
-  return s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, 2e4);
+  return clean(s).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, 2e4);
 }
 async function fetchBoard(ats, slug) {
   try {
@@ -21720,10 +21730,10 @@ async function seed() {
       rows.push({
         source: s.source,
         source_uid: l.id,
-        company_name: String(l.company_name).slice(0, 200),
-        title: String(l.title).slice(0, 300),
-        canonical_url: String(l.url).slice(0, 800),
-        locations: l.locations ?? [],
+        company_name: clean(l.company_name).slice(0, 200),
+        title: clean(l.title).slice(0, 300),
+        canonical_url: clean(l.url).slice(0, 800),
+        locations: (l.locations ?? []).map((x) => clean(x).slice(0, 120)),
         kind: s.kind,
         terms: l.terms ?? (l.season ? [l.season] : []),
         sponsorship: SPONSOR_MAP[l.sponsorship ?? ""] ?? "unknown",
@@ -21789,10 +21799,10 @@ async function poll() {
             company_id: b.id,
             source: b.ats,
             source_uid: `${b.board_token}:${j.uid}`,
-            company_name: b.name,
-            title: j.title.slice(0, 300),
-            canonical_url: j.url.slice(0, 800),
-            locations: j.locations,
+            company_name: clean(b.name).slice(0, 200),
+            title: clean(j.title).slice(0, 300),
+            canonical_url: clean(j.url).slice(0, 800),
+            locations: j.locations.map((l) => clean(l).slice(0, 120)),
             description: keepFull ? j.description : j.description?.slice(0, 1500) ?? null,
             kind: cls.kind,
             terms: cls.terms,

@@ -21617,13 +21617,28 @@ function clean(s) {
   for (let i = 0; i < str.length; i++) {
     const c = str.charCodeAt(i);
     if (c === 0) continue;
+    if (c >= 55296 && c <= 56319) {
+      const n = str.charCodeAt(i + 1);
+      if (n >= 56320 && n <= 57343) {
+        out += str[i] + str[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (c >= 56320 && c <= 57343) continue;
     out += c < 32 && c !== 9 && c !== 10 && c !== 13 ? " " : str[i];
   }
   return out;
 }
+function cut(s, n) {
+  let t = s.slice(0, n);
+  const last = t.charCodeAt(t.length - 1);
+  if (last >= 55296 && last <= 56319) t = t.slice(0, -1);
+  return t;
+}
 function stripHtml(s) {
   if (!s) return null;
-  return clean(s).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, 2e4);
+  return cut(clean(s).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(), 2e4);
 }
 async function fetchBoard(ats, slug) {
   try {
@@ -21730,10 +21745,10 @@ async function seed() {
       rows.push({
         source: s.source,
         source_uid: l.id,
-        company_name: clean(l.company_name).slice(0, 200),
-        title: clean(l.title).slice(0, 300),
-        canonical_url: clean(l.url).slice(0, 800),
-        locations: (l.locations ?? []).map((x) => clean(x).slice(0, 120)),
+        company_name: cut(clean(l.company_name), 200),
+        title: cut(clean(l.title), 300),
+        canonical_url: cut(clean(l.url), 800),
+        locations: (l.locations ?? []).map((x) => cut(clean(x), 120)),
         kind: s.kind,
         terms: l.terms ?? (l.season ? [l.season] : []),
         sponsorship: SPONSOR_MAP[l.sponsorship ?? ""] ?? "unknown",
@@ -21799,11 +21814,11 @@ async function poll() {
             company_id: b.id,
             source: b.ats,
             source_uid: `${b.board_token}:${j.uid}`,
-            company_name: clean(b.name).slice(0, 200),
-            title: clean(j.title).slice(0, 300),
-            canonical_url: clean(j.url).slice(0, 800),
-            locations: j.locations.map((l) => clean(l).slice(0, 120)),
-            description: keepFull ? j.description : j.description?.slice(0, 1500) ?? null,
+            company_name: cut(clean(b.name), 200),
+            title: cut(clean(j.title), 300),
+            canonical_url: cut(clean(j.url), 800),
+            locations: j.locations.map((l) => cut(clean(l), 120)),
+            description: keepFull ? j.description : j.description ? cut(j.description, 1500) : null,
             kind: cls.kind,
             terms: cls.terms,
             grad_year: cls.grad_year,

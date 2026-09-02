@@ -27,3 +27,18 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Wake Corvey's standing loop
+        if: always()
+        continue-on-error: true
+        env:
+          LOOP_URL: ${{ secrets.CORVENO_LOOP_URL }}
+          LOOP_SECRET: ${{ secrets.CORVENO_CRON_SECRET }}
+        run: |
+          if [ -n "$LOOP_URL" ]; then
+            curl -sS -m 20 -X POST "$LOOP_URL" \
+              -H "Authorization: Bearer $LOOP_SECRET" \
+              -H "Content-Type: application/json" \
+              -d '{"maxUsers":6}' || true
+          else
+            echo "CORVENO_LOOP_URL not set — skipping wake-up"
+          fi

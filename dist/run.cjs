@@ -1,3 +1,4 @@
+"use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -6015,8 +6016,8 @@ var require_helpers = __commonJS({
         return null;
       }
       try {
-        const date = /* @__PURE__ */ new Date(`${apiVersion}T00:00:00.0Z`);
-        return date;
+        const date2 = /* @__PURE__ */ new Date(`${apiVersion}T00:00:00.0Z`);
+        return date2;
       } catch (_e) {
         return null;
       }
@@ -17601,9 +17602,9 @@ function createFetchClient(options) {
         },
         body: body ? JSON.stringify(body) : void 0
       });
-      const text = await res.text();
+      const text2 = await res.text();
       const isJson = (res.headers.get("content-type") || "").includes("application/json");
-      const data = isJson && text ? JSON.parse(text) : text;
+      const data = isJson && text2 ? JSON.parse(text2) : text2;
       if (!res.ok) {
         const errBody = isJson ? data : void 0;
         const errorDetail = errBody?.error;
@@ -21571,26 +21572,3867 @@ function shouldShowDeprecationWarning() {
 if (shouldShowDeprecationWarning()) console.warn("\u26A0\uFE0F  Node.js 20 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 22 or later. For more information, visit: https://github.com/orgs/supabase/discussions/45715");
 
 // src/run.ts
+var import_node_crypto2 = require("node:crypto");
+
+// src/primary-source.ts
+var import_node_crypto = require("node:crypto");
+
+// src/country-evidence.ts
+var supportedMarketCodes = ["US", "CA", "AU", "GB", "IN", "SG", "JP"];
+var normalized = (value) => value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+var aliases = /* @__PURE__ */ new Map();
+for (const locale of ["en", "fr", "ja", "hi", "ta", "zh", "ms"]) {
+  const display = new Intl.DisplayNames([locale], { type: "region", fallback: "none" });
+  for (const code of supportedMarketCodes) {
+    const name = display.of(code);
+    if (name) aliases.set(normalized(name), code);
+  }
+}
+for (const [name, code] of [["United States of America", "US"], ["Great Britain", "GB"], ["\u65E5\u672C\u56FD", "JP"]]) aliases.set(normalized(name), code);
+function explicitCountryAlias(value) {
+  return typeof value === "string" ? aliases.get(normalized(value)) ?? null : null;
+}
+var escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var names = [...aliases.entries()].map(([name, country]) => ({ country, pattern: new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escape(name)}(?![\\p{L}\\p{M}\\p{N}])`, "giu"), name }));
+
+// src/primary-source.ts
+var CollectionError = class extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+};
+var object = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+var iso3 = {
+  USA: "US",
+  CAN: "CA",
+  AUS: "AU",
+  GBR: "GB",
+  IND: "IN",
+  SGP: "SG",
+  JPN: "JP",
+  DEU: "DE",
+  FRA: "FR",
+  IRL: "IE",
+  NLD: "NL",
+  NZL: "NZ",
+  CHE: "CH",
+  SWE: "SE",
+  ESP: "ES",
+  ITA: "IT",
+  POL: "PL",
+  CHN: "CN",
+  KOR: "KR",
+  HKG: "HK",
+  TWN: "TW",
+  BRA: "BR",
+  MEX: "MX",
+  ARE: "AE",
+  ISR: "IL",
+  ZAF: "ZA",
+  IDN: "ID",
+  MYS: "MY",
+  PHL: "PH",
+  VNM: "VN",
+  THA: "TH",
+  PRT: "PT",
+  AUT: "AT",
+  BEL: "BE",
+  DNK: "DK",
+  FIN: "FI",
+  NOR: "NO",
+  CZE: "CZ",
+  LUX: "LU",
+  ROU: "RO",
+  HUN: "HU",
+  GRC: "GR",
+  TUR: "TR",
+  ARG: "AR",
+  CHL: "CL",
+  COL: "CO",
+  PER: "PE",
+  PAK: "PK",
+  BGD: "BD",
+  LKA: "LK",
+  NPL: "NP",
+  EGY: "EG",
+  KEN: "KE",
+  NGA: "NG",
+  SAU: "SA",
+  QAT: "QA",
+  KWT: "KW",
+  BHR: "BH"
+};
+var regions = new Intl.DisplayNames(["en"], {
+  type: "region",
+  fallback: "none"
+});
+var excludedRegions = new Set(
+  "AC AN BU CP CS DD DG EA EU EZ FX IC NT QO SU TA TP UN XA XB YD YU ZR ZZ".split(
+    " "
+  )
+);
+var countryNames = /* @__PURE__ */ new Map([
+  ["united states of america", "US"]
+]);
+for (let a = 65; a <= 90; a++)
+  for (let b = 65; b <= 90; b++) {
+    const code = String.fromCharCode(a, b), name = regions.of(code);
+    if (name && !excludedRegions.has(code) && !countryNames.has(name.toLowerCase()))
+      countryNames.set(name.toLowerCase(), code);
+  }
+function explicitCountry(raw) {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim(), upper = value.toUpperCase();
+  if (upper === "UK") return "GB";
+  if (iso3[upper]) return iso3[upper];
+  if (/^[A-Z]{2}$/.test(upper) && !excludedRegions.has(upper) && regions.of(upper))
+    return upper;
+  return countryNames.get(value.toLowerCase()) ?? explicitCountryAlias(value);
+}
+function decodeEntities(raw) {
+  return raw.replace(
+    /&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi,
+    (all, name) => {
+      const n = name.toLowerCase();
+      if (n[0] === "#") {
+        const point = n[1] === "x" ? parseInt(n.slice(2), 16) : Number(n.slice(1));
+        return point > 0 && point <= 1114111 && !(point >= 55296 && point <= 57343) ? String.fromCodePoint(point) : all;
+      }
+      return {
+        amp: "&",
+        lt: "<",
+        gt: ">",
+        quot: '"',
+        apos: "'",
+        nbsp: " "
+      }[n] ?? all;
+    }
+  );
+}
+function plainText(raw) {
+  let html = raw;
+  const structure = "(?:html|body|p|div|span|ul|ol|li|h[1-6]|br|section|article|table|strong|em)";
+  const literalMarkup = new RegExp(`<\\/?${structure}\\b`, "i");
+  const escapedMarkup = new RegExp(
+    `&(?:amp;)?lt;\\/?${structure}(?:&|\\s|>)`,
+    "i"
+  );
+  for (let depth = 0; depth < 2 && !literalMarkup.test(html) && escapedMarkup.test(html); depth++)
+    html = decodeEntities(html);
+  const stripped = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<\s*(?:br\b[^>]*|\/(?:p|div|li|h[1-6]))\s*\/?>/gi, "\n").replace(
+    /<\/?(?:html|body|head|title|meta|link|a|abbr|address|article|aside|b|blockquote|button|caption|code|col|dd|del|details|div|dl|dt|em|fieldset|figcaption|figure|font|footer|form|h[1-6]|header|hr|i|iframe|img|input|label|legend|li|main|nav|ol|option|p|pre|s|section|select|small|span|strong|sub|summary|sup|table|tbody|td|textarea|th|thead|time|tr|u|ul)\b[^>]*>/gi,
+    " "
+  );
+  return decodeEntities(stripped).replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
+}
+function stable(value) {
+  return Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(
+    Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => [k, stable(v)])
+  ) : value;
+}
+function text(v) {
+  return typeof v === "string" ? v : null;
+}
+function date(v) {
+  if (v === null || v === void 0) return null;
+  const time = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+function employmentType(value) {
+  if (typeof value !== "string") return null;
+  return {
+    fulltime: "full_time",
+    parttime: "part_time",
+    intern: "internship",
+    internship: "internship",
+    contract: "contract",
+    contractor: "contract",
+    temporary: "temporary",
+    coop: "co_op",
+    apprenticeship: "apprenticeship",
+    research: "research"
+  }[value.toLowerCase().replace(/[\s_-]/g, "")] ?? null;
+}
+function worldwideEvidence(fields, job) {
+  const workplace = typeof job.workplaceType === "string" ? job.workplaceType.trim().toLowerCase() : null;
+  if (job.isRemote === false || workplace === "onsite" || workplace === "on-site" || workplace === "hybrid") return null;
+  const remote = workplace === "remote" ? { path: "workplaceType", value: job.workplaceType } : job.isRemote === true ? { path: "isRemote", value: true } : null;
+  const scope = "(?:worldwide|anywhere in the world)";
+  const combined = new RegExp(`^(?:remote\\s*(?:[-\u2013\u2014|:,/]\\s*)?${scope}|remote\\s*\\(\\s*${scope}\\s*\\)|${scope}\\s*(?:[-\u2013\u2014|:,/]\\s*)?remote)$`, "i");
+  for (const field of fields) {
+    if (typeof field.raw !== "string") continue;
+    const label = field.raw.trim().replace(/\s+/g, " ");
+    if (combined.test(label) || remote && new RegExp(`^${scope}$`, "i").test(label))
+      return { fieldPath: field.path, quote: field.raw, ...remote ? { remoteEvidence: remote } : {} };
+  }
+  return null;
+}
+function normalizeJob(ats, slug, raw) {
+  const j = object(raw), cats = object(j.categories), issues = [];
+  const uid = typeof j.id === "string" ? j.id : typeof j.id === "number" && Number.isSafeInteger(j.id) ? String(j.id) : null;
+  const title = text(ats === "lever" ? j.text : j.title), url = text(
+    ats === "greenhouse" ? j.absolute_url : ats === "lever" ? j.hostedUrl : j.jobUrl ?? j.applyUrl
+  );
+  if (!uid || !title?.trim() || !url || uid.length > 200 || title.length > 2e3 || url.length > 8192)
+    throw new CollectionError("MALFORMED_JOB");
+  try {
+    const u = new URL(url);
+    if (!["http:", "https:"].includes(u.protocol) || u.username || u.password)
+      throw Error();
+  } catch {
+    throw new CollectionError("MALFORMED_JOB_URL");
+  }
+  const rawJson = JSON.stringify(stable(j));
+  if (Buffer.byteLength(rawJson, "utf8") > 1048576)
+    throw new CollectionError("JOB_TOO_LARGE");
+  let description = null;
+  if (ats === "greenhouse")
+    description = text(j.content) !== null ? plainText(j.content) : null;
+  if (ats === "ashby")
+    description = text(j.descriptionHtml) ? plainText(j.descriptionHtml) : text(j.descriptionPlain);
+  if (ats === "lever") {
+    if (j.lists !== void 0 && (!Array.isArray(j.lists) || j.lists.some(
+      (item) => typeof object(item).content !== "string"
+    )))
+      throw new CollectionError("MALFORMED_DESCRIPTION_LISTS");
+    const body = text(j.descriptionPlain) ?? (text(j.description) ? plainText(j.description) : null);
+    const lists = (j.lists ?? []).map(
+      (item) => [text(item.text), plainText(item.content)].filter(Boolean).join("\n")
+    );
+    const additional = text(j.additionalPlain) ?? (text(j.additional) ? plainText(j.additional) : null);
+    description = [body, ...lists, additional].filter(Boolean).join("\n\n") || null;
+  }
+  const originalDescription = description;
+  if (description?.includes("\0")) {
+    description = description.replaceAll("\0", "");
+    issues.push("description:nul-removed-in-readable-copy-original-retained");
+  }
+  const locationFields = ats === "greenhouse" ? [{ path: "location.name", raw: object(j.location).name }] : ats === "lever" ? [
+    { path: "categories.location", raw: cats.location },
+    ...Array.isArray(cats.allLocations) ? cats.allLocations.map((raw2, i) => ({ path: `categories.allLocations[${i}]`, raw: raw2 })) : []
+  ] : [
+    { path: "location", raw: j.location },
+    ...Array.isArray(j.secondaryLocations) ? j.secondaryLocations.map((location2, i) => ({ path: `secondaryLocations[${i}].location`, raw: object(location2).location })) : []
+  ];
+  const locations = locationFields.map((field) => field.raw);
+  const countryFields = ats === "lever" ? [{ path: "country", raw: j.country }] : ats === "ashby" ? [
+    {
+      path: "address.postalAddress.addressCountry",
+      raw: object(object(j.address).postalAddress).addressCountry
+    },
+    ...Array.isArray(j.secondaryLocations) ? j.secondaryLocations.map((l, i) => ({
+      path: `secondaryLocations[${i}].address.addressCountry`,
+      raw: object(object(l).address).addressCountry
+    })) : []
+  ] : [];
+  const evidence = countryFields.filter(
+    (f) => f.raw !== null && f.raw !== void 0
+  ), countries = [
+    ...new Set(
+      evidence.map((f) => explicitCountry(f.raw)).filter((v) => v !== null)
+    )
+  ];
+  for (const f of evidence)
+    if (!explicitCountry(f.raw)) issues.push(`country:unrecognized:${f.path}`);
+  const worldwide = worldwideEvidence([...locationFields, ...countryFields], j);
+  const structuredType = text(
+    ats === "lever" ? cats.commitment : ats === "ashby" ? j.employmentType : null
+  );
+  const listed = ats !== "ashby" || j.isListed !== false;
+  if (ats === "ashby" && j.isListed !== void 0 && typeof j.isListed !== "boolean")
+    throw new CollectionError("MALFORMED_VISIBILITY");
+  return {
+    uid,
+    title,
+    url,
+    locations: [
+      ...new Set(
+        locations.filter(
+          (l) => typeof l === "string" && Boolean(l.trim())
+        )
+      )
+    ],
+    posted_at: date(
+      ats === "lever" ? j.createdAt : ats === "ashby" ? j.publishedAt : j.first_published
+    ),
+    updated_at: date(j.updated_at),
+    structuredType,
+    structured_job_type: employmentType(structuredType),
+    description,
+    description_complete: Boolean(originalDescription?.trim()) && description === originalDescription,
+    country_codes: countries,
+    country_evidence: {
+      source: `${ats}-api`,
+      fieldPaths: evidence.map((f) => f.path),
+      rawValues: evidence.map((f) => f.raw),
+      ...worldwide ? { remote_scope: "worldwide", worldwide_evidence: worldwide } : {}
+    },
+    is_publicly_listed: listed,
+    source_record_json: rawJson,
+    source_content_sha256: (0, import_node_crypto.createHash)("sha256").update(rawJson).digest("hex"),
+    issues
+  };
+}
+function parseBoardResponse(ats, slug, data) {
+  const wrapper = object(data), rows = ats === "lever" ? data : wrapper.jobs;
+  if (!Array.isArray(rows)) throw new CollectionError("MALFORMED_BOARD");
+  if (ats === "greenhouse" && (!Number.isSafeInteger(object(wrapper.meta).total) || object(wrapper.meta).total !== rows.length))
+    throw new CollectionError("INCOMPLETE_BOARD");
+  for (const key of [
+    "next",
+    "nextPage",
+    "nextCursor",
+    "hasMore",
+    "hasNextPage"
+  ]) {
+    if (wrapper[key]) throw new CollectionError("UNEXPECTED_PAGINATION");
+  }
+  if (rows.length > 5e4) throw new CollectionError("TOO_MANY_JOBS");
+  const jobs = [];
+  let skippedMalformed = 0;
+  for (const row of rows) {
+    try {
+      jobs.push(normalizeJob(ats, slug, row));
+    } catch (error) {
+      if (error instanceof CollectionError && (error.code === "MALFORMED_JOB" || error.code === "MALFORMED_JOB_URL")) skippedMalformed++;
+      else throw error;
+    }
+  }
+  if (skippedMalformed > 0 && (jobs.length === 0 || skippedMalformed > Math.max(5, Math.floor(rows.length * 0.1))))
+    throw new CollectionError("MALFORMED_JOB");
+  if (new Set(jobs.map((j) => j.uid)).size !== jobs.length)
+    throw new CollectionError("DUPLICATE_JOB_ID");
+  return Object.assign(jobs, { skippedMalformed });
+}
+function boardUrl(ats, slug, eu = false) {
+  if (!/^[A-Za-z0-9_.-]{1,200}$/.test(slug))
+    throw new CollectionError("INVALID_BOARD");
+  const board = encodeURIComponent(slug);
+  return ats === "greenhouse" ? `https://boards-api.greenhouse.io/v1/boards/${board}/jobs?content=true` : ats === "lever" ? `https://api.${eu ? "eu." : ""}lever.co/v0/postings/${board}?mode=json` : `https://api.ashbyhq.com/posting-api/job-board/${board}`;
+}
+async function abortable(pending, signal) {
+  if (signal.aborted) throw new CollectionError("BODY_TIMEOUT");
+  let abort = () => {
+  };
+  const cancellation = new Promise((_, reject) => {
+    abort = () => reject(new CollectionError("BODY_TIMEOUT"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([pending, cancellation]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs = 3e4, allowPlainJson = false) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await abortable(
+      fetcher(url, {
+        signal: controller.signal,
+        redirect: "error",
+        headers: {
+          "User-Agent": "Corveno corpus (hello@corveno.io)",
+          Accept: "application/json"
+        }
+      }),
+      controller.signal
+    );
+    if (!response.ok) throw new CollectionError(`HTTP_${response.status}`);
+    if (response.status === 206 || response.headers.has("content-range"))
+      throw new CollectionError("PARTIAL_RESPONSE");
+    if (!/\bjson\b/i.test(response.headers.get("content-type") ?? "") && !(allowPlainJson && /^text\/plain\b/i.test(response.headers.get("content-type") ?? "")))
+      throw new CollectionError("NOT_JSON");
+    if (Number(response.headers.get("content-length")) > maxBytes)
+      throw new CollectionError("BODY_TOO_LARGE");
+    const reader = response.body?.getReader();
+    if (!reader) throw new CollectionError("EMPTY_RESPONSE");
+    const chunks = [];
+    let count = 0;
+    try {
+      for (; ; ) {
+        const part = await abortable(reader.read(), controller.signal);
+        if (part.done) break;
+        count += part.value.byteLength;
+        if (count > maxBytes) throw new CollectionError("BODY_TOO_LARGE");
+        chunks.push(part.value);
+      }
+    } finally {
+      void reader.cancel().catch(() => {
+      });
+    }
+    try {
+      return JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
+      );
+    } catch {
+      throw new CollectionError("INVALID_JSON");
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function fetchPrimaryBoard(ats, slug, fetcher = fetch, eu = false) {
+  const url = boardUrl(ats, slug, eu), started = Date.now();
+  if (ats !== "lever") {
+    const parsed = parseBoardResponse(ats, slug, await boundedJson(url, fetcher));
+    return {
+      jobs: parsed,
+      skippedMalformed: parsed.skippedMalformed ?? 0,
+      checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      sourceUrl: url
+    };
+  }
+  let skippedMalformed = 0;
+  const jobs = [], ids = /* @__PURE__ */ new Set();
+  let bytes = 0;
+  for (let skip = 0; skip <= 5e4; ) {
+    if (Date.now() - started > 6e4)
+      throw new CollectionError("BOARD_TIMEOUT");
+    const page = await boundedJson(
+      `${url}&limit=100&skip=${skip}`,
+      fetcher,
+      8388608,
+      Math.min(3e4, 6e4 - (Date.now() - started))
+    );
+    const normalized2 = parseBoardResponse(ats, slug, page);
+    skippedMalformed += normalized2.skippedMalformed ?? 0;
+    if (normalized2.length > 100)
+      throw new CollectionError("PAGINATION_IGNORED");
+    for (const job of normalized2) {
+      if (ids.has(job.uid)) throw new CollectionError("UNSTABLE_PAGINATION");
+      ids.add(job.uid);
+      jobs.push(job);
+      bytes += Buffer.byteLength(job.source_record_json);
+      if (bytes > 25165824) throw new CollectionError("BOARD_TOO_LARGE");
+    }
+    if (normalized2.length === 0)
+      return { jobs, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), sourceUrl: url, skippedMalformed };
+    skip += normalized2.length;
+  }
+  throw new CollectionError("TOO_MANY_JOBS");
+}
+
+// src/employment-evidence.ts
+var EMPLOYMENT_TYPES = [
+  "internship",
+  "full_time",
+  "part_time",
+  "contract",
+  "research",
+  "co_op",
+  "temporary",
+  "apprenticeship"
+];
+var INTERNSHIP_FAMILY = ["internship", "co_op", "apprenticeship"];
+var MAX_QUOTE = 160;
+function employmentTypeFromLabel(raw) {
+  const value = raw.normalize("NFKC").toLowerCase().replace(/[\s_/-]+/g, " ").trim();
+  if (!value) return null;
+  const exact = {
+    "full time": { type: "full_time", confidence: "high" },
+    fulltime: { type: "full_time", confidence: "high" },
+    "full time employee": { type: "full_time", confidence: "high" },
+    "full time permanent": { type: "full_time", confidence: "high" },
+    "permanent full time": { type: "full_time", confidence: "high" },
+    permanent: { type: "full_time", confidence: "medium" },
+    regular: { type: "full_time", confidence: "medium" },
+    "regular full time": { type: "full_time", confidence: "high" },
+    "part time": { type: "part_time", confidence: "high" },
+    parttime: { type: "part_time", confidence: "high" },
+    "part time permanent": { type: "part_time", confidence: "high" },
+    "permanent part time": { type: "part_time", confidence: "high" },
+    intern: { type: "internship", confidence: "high" },
+    internship: { type: "internship", confidence: "high" },
+    "internship full time": { type: "internship", confidence: "high" },
+    "full time internship": { type: "internship", confidence: "high" },
+    "co op": { type: "co_op", confidence: "high" },
+    coop: { type: "co_op", confidence: "high" },
+    contract: { type: "contract", confidence: "high" },
+    contractor: { type: "contract", confidence: "high" },
+    contractual: { type: "contract", confidence: "high" },
+    "fixed term": { type: "contract", confidence: "high" },
+    "fixed term contract": { type: "contract", confidence: "high" },
+    "full time contract": { type: "contract", confidence: "high" },
+    "contract full time": { type: "contract", confidence: "high" },
+    freelance: { type: "contract", confidence: "high" },
+    "contract to hire": { type: "contract", confidence: "high" },
+    temporary: { type: "temporary", confidence: "high" },
+    temp: { type: "temporary", confidence: "high" },
+    seasonal: { type: "temporary", confidence: "high" },
+    casual: { type: "temporary", confidence: "medium" },
+    "temporary full time": { type: "temporary", confidence: "high" },
+    apprenticeship: { type: "apprenticeship", confidence: "high" },
+    apprentice: { type: "apprenticeship", confidence: "high" },
+    research: { type: "research", confidence: "medium" }
+  };
+  if (exact[value]) return exact[value];
+  const head2 = value.replace(/\(.*?\)/g, " ").split(/[,;|]/)[0].trim();
+  if (head2 && exact[head2]) return exact[head2];
+  return null;
+}
+var quoteOf = (text2, index, length) => {
+  const start = Math.max(0, index - 40);
+  const end = Math.min(text2.length, index + length + 60);
+  return text2.slice(start, end).replace(/\s+/g, " ").trim().slice(0, MAX_QUOTE);
+};
+var STUDY_CONTEXT = /\b(?:student|students|study|studies|studying|enrol+ed|enrolment|enrollment|degree|programme|program|course|education|university|college|school)\b/i;
+function titleItems(rawTitle) {
+  const title = rawTitle.normalize("NFKC");
+  const items = [];
+  const push = (type, match, confidence) => {
+    if (match && match.index !== void 0) items.push({ type, quote: quoteOf(title, match.index, match[0].length), field: "title", confidence });
+  };
+  const administrative = /\b(?:intern(?:ship)?s?|co[- ]?ops?)\s+(?:program(?:me)?\s+(?:manager|coordinator|director|lead)|recruit(?:er|ing|ment)|hiring|talent|coordinator|manager)\b/i;
+  const stripped = title.replace(administrative, " ");
+  push("internship", stripped.match(/\bintern(?:ship)?s?\b/i), "high");
+  push("internship", stripped.match(/\bworking student\b/i), "medium");
+  push("internship", stripped.match(/インターン(?:シップ)?/), "high");
+  push("co_op", stripped.match(/\bco[- ]?op\b/i), "high");
+  push("apprenticeship", stripped.match(/\bapprentice(?:ship)?s?\b/i), "high");
+  push("apprenticeship", stripped.match(/\b(?:alternance|apprenti(?:e|s)?)\b/i), "high");
+  push("part_time", title.match(/\bpart[- ]time\b/i), "high");
+  push("part_time", title.match(/\btemps partiel\b/i), "high");
+  push("part_time", title.match(/(?:パート(?:タイム)?|アルバイト)/), "high");
+  push("contract", title.match(/\b(?:contractor|contractual|fixed[- ]term|freelance|FTC)\b/i), "high");
+  push("contract", title.match(/\bcontract\b/i), "medium");
+  push("contract", title.match(/\bCDD\b/), "high");
+  push("contract", title.match(/(?:契約社員|業務委託)/), "high");
+  push("temporary", title.match(/\b(?:temporary|temp|seasonal)\b/i), "high");
+  push("temporary", title.match(/\bcasual\b/i), "medium");
+  push("temporary", title.match(/(?:派遣|臨時)/), "high");
+  push("full_time", title.match(/\bfull[- ]time\b/i), "medium");
+  push("full_time", title.match(/\btemps plein\b/i), "high");
+  push("full_time", title.match(/正社員/), "high");
+  push("full_time", title.match(/\bCDI\b/), "medium");
+  push("research", title.match(/\b(?:postdoc(?:toral)?|post-doctoral|research fellow)\b/i), "medium");
+  return items;
+}
+function descriptionItems(rawDescription) {
+  const text2 = rawDescription.normalize("NFKC");
+  const items = [];
+  const push = (type, index, length, confidence) => {
+    items.push({ type, quote: quoteOf(text2, index, length), field: "description", confidence });
+  };
+  const typed = /\b(?:employment|job|position|contract|worker|work|time|role|engagement|hours)\s*(?:type|category|status)?\s*[:\-–|]\s*([A-Za-z][A-Za-z0-9 /,()-]{1,40})/gi;
+  for (const match of text2.matchAll(typed)) {
+    if (!/type|category|status|hours|schedule/i.test(match[0].split(/[:\-–|]/)[0]) && !/\bhours\b/i.test(match[0])) continue;
+    const label = employmentTypeFromLabel(match[1]);
+    if (label && match.index !== void 0) push(label.type, match.index, match[0].length, label.confidence);
+  }
+  const schedule = /\bschedule\s*[:\-–|]\s*(full[- ]?time|part[- ]?time)\b/gi;
+  for (const match of text2.matchAll(schedule)) {
+    const label = employmentTypeFromLabel(match[1]);
+    if (label && match.index !== void 0) push(label.type, match.index, match[0].length, "high");
+  }
+  const sentence = /\bthis (?:is (?:a|an)|(?:position|role|job|opportunity) is (?:a|an))\s+(?:[\w-]+\s+){0,3}?(full[- ]time|part[- ]time|contract|temporary|fixed[- ]term|internship|co[- ]?op|apprenticeship|seasonal|freelance)\b/gi;
+  for (const match of text2.matchAll(sentence)) {
+    const label = employmentTypeFromLabel(match[1]);
+    if (!label || match.index === void 0) continue;
+    const tail = text2.slice(match.index + match[0].length, match.index + match[0].length + 30);
+    if (STUDY_CONTEXT.test(tail)) continue;
+    const commitment = tail.match(/^\s+(contract(?:or)?|fixed[- ]term|temporary|temp|seasonal|internship|intern|co[- ]?op|apprenticeship)\b/i);
+    const type = commitment ? employmentTypeFromLabel(commitment[1])?.type ?? label.type : label.type;
+    push(type, match.index, match[0].length + (commitment ? commitment[0].length : 0), "high");
+  }
+  const prose = /\b(full[- ]time|part[- ]time|temporary|seasonal|fixed[- ]term)\s+(?:position|role|opportunity|employment|job|hours|basis|contract)\b/gi;
+  for (const match of text2.matchAll(prose)) {
+    if (match.index === void 0) continue;
+    const before = text2.slice(Math.max(0, match.index - 25), match.index);
+    const after = text2.slice(match.index + match[0].length, match.index + match[0].length + 25);
+    if (STUDY_CONTEXT.test(before) || STUDY_CONTEXT.test(after)) continue;
+    const label = employmentTypeFromLabel(match[1]);
+    if (!label) continue;
+    const isContract = /\bcontract\b/i.test(match[0]) && label.type !== "contract";
+    push(isContract ? "contract" : label.type, match.index, match[0].length, "medium");
+  }
+  const ja = /雇用形態\s*[:：]?\s*(正社員|契約社員|パート(?:タイム)?|アルバイト|派遣(?:社員)?|業務委託|インターン(?:シップ)?|嘱託)/g;
+  for (const match of text2.matchAll(ja)) {
+    if (match.index === void 0) continue;
+    const map = { \u6B63\u793E\u54E1: "full_time", \u5951\u7D04\u793E\u54E1: "contract", \u30D1\u30FC\u30C8: "part_time", \u30D1\u30FC\u30C8\u30BF\u30A4\u30E0: "part_time", \u30A2\u30EB\u30D0\u30A4\u30C8: "part_time", \u6D3E\u9063: "temporary", \u6D3E\u9063\u793E\u54E1: "temporary", \u696D\u52D9\u59D4\u8A17: "contract", \u30A4\u30F3\u30BF\u30FC\u30F3: "internship", \u30A4\u30F3\u30BF\u30FC\u30F3\u30B7\u30C3\u30D7: "internship", \u5631\u8A17: "contract" };
+    const type = map[match[1]];
+    if (type) push(type, match.index, match[0].length, "high");
+  }
+  const fr = /\btype\s+(?:de\s+)?(?:contrat|poste|d'emploi|emploi)\s*[:\-–]\s*([A-Za-zÀ-ÿ' -]{2,30})/gi;
+  for (const match of text2.matchAll(fr)) {
+    if (match.index === void 0) continue;
+    const v = match[1].normalize("NFKC").toLowerCase().trim();
+    const type = /^cdi\b/.test(v) ? "full_time" : /^cdd\b|^contrat/.test(v) ? "contract" : /^stage\b|^stagiaire/.test(v) ? "internship" : /^alternance|^apprenti/.test(v) ? "apprenticeship" : /^temps partiel/.test(v) ? "part_time" : /^temps plein/.test(v) ? "full_time" : /^int[ée]rim|^temporaire|^saisonnier/.test(v) ? "temporary" : null;
+    if (type) push(type, match.index, match[0].length, /^cdi\b/.test(v) ? "medium" : "high");
+  }
+  return items;
+}
+var rank = {
+  internship: 8,
+  co_op: 8,
+  apprenticeship: 8,
+  research: 5,
+  contract: 4,
+  temporary: 4,
+  part_time: 3,
+  full_time: 1
+};
+function resolveEmploymentType(items) {
+  if (!items.length) return { type: null, confidence: null, conflict: false };
+  const family = items.filter((item) => INTERNSHIP_FAMILY.includes(item.type));
+  if (family.length) {
+    const best = [...family].sort((a, b) => a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1)[0];
+    return { type: best.type, confidence: best.confidence, conflict: false };
+  }
+  const high = items.filter((item) => item.confidence === "high");
+  const pool = high.length ? high : items;
+  const types = [...new Set(pool.map((item) => item.type))];
+  if (high.length && types.includes("full_time") && types.includes("part_time"))
+    return { type: null, confidence: null, conflict: true };
+  const winner = types.sort((a, b) => rank[b] - rank[a])[0];
+  return { type: winner, confidence: high.length ? "high" : "medium", conflict: false };
+}
+var COMMITMENT_MARKERS = /\b(?:part[- ]?time|full[- ]?time|contract(?:or|ual)?|fixed[- ]term|temporary|temp\b|seasonal|casual|freelance|hourly|per diem|prn|locum|zero[- ]hours?|intern(?:ship)?s?|co[- ]?op|apprentice(?:ship)?s?|working student|fellowship|volunteer|stage|stagiaire|alternance|cdd|cdi|temps (?:plein|partiel)|int[ée]rim|vacation)\b|正社員|契約社員|派遣|アルバイト|パート|インターン|業務委託|嘱託|臨時|フリーランス/i;
+function impliedFullTime(input) {
+  if (input.kind === "intern") return null;
+  const text2 = `${input.title}
+${input.description}`.normalize("NFKC");
+  if (input.description.trim().length < 200) return null;
+  if (COMMITMENT_MARKERS.test(text2)) return null;
+  return { type: "full_time", quote: "Commitment not stated: the posting mentions no part-time, contract, temporary, seasonal, internship or apprenticeship terms.", field: "implied", confidence: "medium" };
+}
+function employmentTypeEvidence(input) {
+  const items = [];
+  if (input.structured && EMPLOYMENT_TYPES.includes(input.structured))
+    items.push({ type: input.structured, quote: input.structured, field: "structured", confidence: "high" });
+  items.push(...titleItems(input.title ?? ""));
+  if (input.description) items.push(...descriptionItems(input.description));
+  if (!items.length && input.description) {
+    const implied = impliedFullTime({ title: input.title ?? "", description: input.description, kind: input.kind ?? null });
+    if (implied) items.push(implied);
+  }
+  const resolved = resolveEmploymentType(items);
+  if (input.structured && resolved.type && !INTERNSHIP_FAMILY.includes(resolved.type) && EMPLOYMENT_TYPES.includes(input.structured))
+    return { type: input.structured, confidence: "high", conflict: false, items };
+  return { ...resolved, items };
+}
+
+// src/location-gazetteer-data.ts
+var gazetteerSource = {
+  US: {
+    regions: [
+      "Alabama",
+      "Alaska",
+      "Arizona",
+      "Arkansas",
+      "California",
+      "Colorado",
+      "Connecticut",
+      "Delaware",
+      "Florida",
+      "Georgia",
+      "Hawaii",
+      "Idaho",
+      "Illinois",
+      "Indiana",
+      "Iowa",
+      "Kansas",
+      "Kentucky",
+      "Louisiana",
+      "Maine",
+      "Maryland",
+      "Massachusetts",
+      "Michigan",
+      "Minnesota",
+      "Mississippi",
+      "Missouri",
+      "Montana",
+      "Nebraska",
+      "Nevada",
+      "New Hampshire",
+      "New Jersey",
+      "New Mexico",
+      "New York|New York State",
+      "North Carolina",
+      "North Dakota",
+      "Ohio",
+      "Oklahoma",
+      "Oregon",
+      "Pennsylvania",
+      "Rhode Island",
+      "South Carolina",
+      "South Dakota",
+      "Tennessee",
+      "Texas",
+      "Utah",
+      "Vermont",
+      "Virginia",
+      "Washington|Washington State",
+      "West Virginia",
+      "Wisconsin",
+      "Wyoming",
+      "District of Columbia|Washington DC|Washington D C",
+      "Puerto Rico"
+    ],
+    regionCodes: [
+      "AL",
+      "AK",
+      "AZ",
+      "AR",
+      "CA",
+      "CO",
+      "CT",
+      "DE",
+      "FL",
+      "GA",
+      "HI",
+      "ID",
+      "IL",
+      "IN",
+      "IA",
+      "KS",
+      "KY",
+      "LA",
+      "ME",
+      "MD",
+      "MA",
+      "MI",
+      "MN",
+      "MS",
+      "MO",
+      "MT",
+      "NE",
+      "NV",
+      "NH",
+      "NJ",
+      "NM",
+      "NY",
+      "NC",
+      "ND",
+      "OH",
+      "OK",
+      "OR",
+      "PA",
+      "RI",
+      "SC",
+      "SD",
+      "TN",
+      "TX",
+      "UT",
+      "VT",
+      "VA",
+      "WA",
+      "WV",
+      "WI",
+      "WY",
+      "DC",
+      "PR"
+    ],
+    cities: [
+      "New York City|NYC",
+      "Los Angeles",
+      "Chicago",
+      "Houston",
+      "Phoenix",
+      "Philadelphia",
+      "San Antonio",
+      "San Diego",
+      "Dallas",
+      "San Jose",
+      "Austin",
+      "Jacksonville",
+      "Fort Worth",
+      "Columbus",
+      "Charlotte",
+      "San Francisco",
+      "Indianapolis",
+      "Seattle",
+      "Denver",
+      "Boston",
+      "El Paso",
+      "Nashville",
+      "Detroit",
+      "Oklahoma City",
+      "Portland",
+      "Las Vegas",
+      "Memphis",
+      "Louisville",
+      "Baltimore",
+      "Milwaukee",
+      "Albuquerque",
+      "Tucson",
+      "Fresno",
+      "Mesa",
+      "Sacramento",
+      "Atlanta",
+      "Kansas City",
+      "Colorado Springs",
+      "Omaha",
+      "Raleigh",
+      "Miami",
+      "Long Beach",
+      "Virginia Beach",
+      "Oakland",
+      "Minneapolis",
+      "Tulsa",
+      "Tampa",
+      "Arlington",
+      "New Orleans",
+      "Wichita",
+      "Cleveland",
+      "Bakersfield",
+      "Aurora",
+      "Anaheim",
+      "Honolulu",
+      "Santa Ana",
+      "Riverside",
+      "Corpus Christi",
+      "Lexington",
+      "Stockton",
+      "Henderson",
+      "Saint Paul|St Paul",
+      "Saint Louis|St Louis",
+      "Cincinnati",
+      "Pittsburgh",
+      "Greensboro",
+      "Anchorage",
+      "Plano",
+      "Lincoln",
+      "Orlando",
+      "Irvine",
+      "Newark",
+      "Durham",
+      "Chula Vista",
+      "Toledo",
+      "Fort Wayne",
+      "Saint Petersburg|St Petersburg",
+      "Laredo",
+      "Jersey City",
+      "Chandler",
+      "Madison",
+      "Lubbock",
+      "Scottsdale",
+      "Reno",
+      "Buffalo",
+      "Glendale",
+      "Winston-Salem",
+      "Chesapeake",
+      "Norfolk",
+      "Fremont",
+      "Hialeah",
+      "Richmond",
+      "Boise",
+      "Spokane",
+      "Baton Rouge",
+      "Tacoma",
+      "San Bernardino",
+      "Modesto",
+      "Des Moines",
+      "Fayetteville",
+      "Birmingham",
+      "Rochester",
+      "Grand Rapids",
+      "Huntsville",
+      "Salt Lake City",
+      "Frisco",
+      "Yonkers",
+      "Amarillo",
+      "Huntington Beach",
+      "McKinney",
+      "Akron",
+      "Little Rock",
+      "Tempe",
+      "Overland Park",
+      "Tallahassee",
+      "Knoxville",
+      "Worcester",
+      "Ontario",
+      "Vancouver",
+      "Sioux Falls",
+      "Chattanooga",
+      "Fort Lauderdale",
+      "Santa Rosa",
+      "Peoria",
+      "Salem",
+      "Cary",
+      "Fort Collins",
+      "Springfield",
+      "Alexandria",
+      "Hayward",
+      "Lakewood",
+      "Lancaster",
+      "Pasadena",
+      "Sunnyvale",
+      "Bellevue",
+      "Bridgeport",
+      "Torrance",
+      "Syracuse",
+      "Charleston",
+      "Waco",
+      "Columbia",
+      "Round Rock",
+      "Cedar Rapids",
+      "Sterling",
+      "Santa Clara",
+      "Mountain View",
+      "Palo Alto",
+      "Menlo Park",
+      "Redwood City",
+      "Cupertino",
+      "San Mateo",
+      "South San Francisco",
+      "Berkeley",
+      "Redmond",
+      "Kirkland",
+      "Boulder",
+      "Ann Arbor",
+      "Cambridge",
+      "Princeton",
+      "Stamford",
+      "Hartford",
+      "New Haven",
+      "Albany",
+      "Bethesda",
+      "Reston",
+      "McLean",
+      "Tysons|Tysons Corner",
+      "Herndon",
+      "Chapel Hill",
+      "Provo",
+      "Lehi",
+      "Boca Raton",
+      "Sarasota",
+      "Gainesville",
+      "Bozeman",
+      "Fargo",
+      "Lansing",
+      "Dayton",
+      "Scranton",
+      "Allentown",
+      "Harrisburg",
+      "Wilmington",
+      "Dover",
+      "Annapolis",
+      "Roanoke",
+      "Greenville",
+      "Asheville",
+      "Topeka",
+      "Manhattan",
+      "Brooklyn",
+      "Bronx",
+      "Staten Island",
+      "Queens",
+      "Hollywood",
+      "Burbank",
+      "Santa Monica",
+      "Culver City",
+      "Irving",
+      "Manchester",
+      "Kingston",
+      "Windsor",
+      "Waterloo",
+      "Halifax",
+      "Hamilton",
+      "Melbourne",
+      "Paris",
+      "Georgetown",
+      "Bath",
+      "Reading",
+      "Brighton",
+      "York",
+      "Plymouth",
+      "Portsmouth",
+      "Newport",
+      "Warwick",
+      "Bedford",
+      "Chatham",
+      "Burlington",
+      "Milton",
+      "Woodstock",
+      "Belleville",
+      "Niagara Falls",
+      "White Rock",
+      "Langley",
+      "Bangor",
+      "Livingston",
+      "The Woodlands|Woodlands",
+      "Perth Amboy",
+      "Oxford",
+      "Bristol",
+      "Southampton",
+      "Westminster",
+      "Camden",
+      "Greenwich",
+      "Carlisle",
+      "Chester",
+      "Wakefield",
+      "Northampton",
+      "Chelmsford",
+      "Aberdeen",
+      "Lincoln Park",
+      "Naperville",
+      "Schaumburg",
+      "Evanston",
+      "Rockville",
+      "Silver Spring",
+      "Jersey Shore",
+      "Hoboken",
+      "White Plains",
+      "Stamford",
+      "New Brunswick",
+      "Piscataway",
+      "Edison",
+      "Morristown",
+      "Parsippany",
+      "Cherry Hill",
+      "King of Prussia",
+      "Conshohocken",
+      "Malvern",
+      "Wayne",
+      "Ithaca",
+      "Rochester Hills",
+      "Troy",
+      "Dearborn",
+      "Bloomington",
+      "Champaign",
+      "Urbana",
+      "Iowa City",
+      "Ames",
+      "Lawrence",
+      "Norman",
+      "Stillwater",
+      "College Station",
+      "Plano",
+      "Richardson",
+      "Sugar Land",
+      "The Woodlands",
+      "Katy",
+      "Pearland",
+      "Santa Barbara",
+      "San Luis Obispo",
+      "Santa Cruz",
+      "Monterey",
+      "Carlsbad",
+      "La Jolla",
+      "Oceanside",
+      "Escondido",
+      "Temecula",
+      "Ventura",
+      "Oxnard",
+      "Thousand Oaks",
+      "Simi Valley",
+      "Walnut Creek",
+      "Pleasanton",
+      "Dublin",
+      "Livermore",
+      "San Ramon",
+      "Concord",
+      "Emeryville",
+      "Alameda",
+      "Foster City",
+      "Burlingame",
+      "Millbrae",
+      "Los Gatos",
+      "Campbell",
+      "Milpitas",
+      "Newark",
+      "Union City",
+      "Vallejo",
+      "Napa",
+      "Santa Rosa",
+      "Petaluma",
+      "Davis",
+      "Roseville",
+      "Folsom",
+      "Elk Grove",
+      "Chico",
+      "Redding",
+      "Eugene",
+      "Salem",
+      "Bend",
+      "Beaverton",
+      "Hillsboro",
+      "Vancouver",
+      "Olympia",
+      "Everett",
+      "Bothell",
+      "Renton",
+      "Kent",
+      "Federal Way",
+      "Bellingham",
+      "Yakima",
+      "Coeur d'Alene|Coeur dAlene",
+      "Missoula",
+      "Billings",
+      "Cheyenne",
+      "Casper",
+      "Sioux City",
+      "Lincoln",
+      "Grand Island",
+      "Rapid City",
+      "Bismarck",
+      "Duluth",
+      "Rochester",
+      "Bloomington",
+      "Eden Prairie",
+      "Green Bay",
+      "Appleton",
+      "Kenosha",
+      "Racine",
+      "Ann Arbor",
+      "Flint",
+      "Kalamazoo",
+      "Toledo",
+      "Columbus",
+      "Akron",
+      "Canton",
+      "Youngstown",
+      "Louisville",
+      "Lexington",
+      "Bowling Green",
+      "Memphis",
+      "Chattanooga",
+      "Murfreesboro",
+      "Franklin",
+      "Jackson",
+      "Gulfport",
+      "Mobile",
+      "Montgomery",
+      "Tuscaloosa",
+      "Savannah",
+      "Augusta",
+      "Macon",
+      "Athens",
+      "Alpharetta",
+      "Marietta",
+      "Columbia",
+      "Charleston",
+      "Myrtle Beach",
+      "Wilmington",
+      "Greensboro",
+      "Winston-Salem",
+      "Durham",
+      "Cary",
+      "Norfolk",
+      "Newport News",
+      "Hampton",
+      "Richmond",
+      "Fairfax",
+      "Arlington",
+      "Alexandria",
+      "Chantilly",
+      "Leesburg",
+      "Ashburn",
+      "Frederick",
+      "Columbia",
+      "Baltimore",
+      "Towson",
+      "Annapolis",
+      "Dover",
+      "Newark",
+      "Trenton",
+      "Camden",
+      "Atlantic City",
+      "New Brunswick",
+      "Providence",
+      "Warwick",
+      "Hartford",
+      "New Haven",
+      "Stamford",
+      "Bridgeport",
+      "Springfield",
+      "Worcester",
+      "Lowell",
+      "Waltham",
+      "Burlington",
+      "Lexington",
+      "Quincy",
+      "Newton",
+      "Somerville",
+      "Medford",
+      "Nashua",
+      "Manchester",
+      "Concord",
+      "Portland",
+      "Burlington",
+      "Montpelier",
+      "Honolulu",
+      "Juneau",
+      "Fairbanks",
+      "San Juan"
+    ],
+    metros: [
+      "Bay Area",
+      "San Francisco Bay Area",
+      "SF Bay Area",
+      "Silicon Valley",
+      "Greater Boston",
+      "Greater Seattle",
+      "Greater Los Angeles",
+      "Greater Philadelphia",
+      "Greater Chicago",
+      "Chicagoland",
+      "Twin Cities",
+      "Dallas-Fort Worth|DFW",
+      "Research Triangle",
+      "Inland Empire",
+      "Orange County",
+      "South Florida",
+      "Central Florida",
+      "Northern Virginia|NoVA",
+      "New England",
+      "Southern California|SoCal",
+      "Northern California|NorCal",
+      "East Bay",
+      "South Bay",
+      "Westchester",
+      "Long Island",
+      "Hudson Valley",
+      "Tri-State Area",
+      "DC Metro",
+      "Washington Metro",
+      "Greater Washington",
+      "Greater Houston",
+      "Greater Denver",
+      "Greater Atlanta",
+      "Greater Phoenix",
+      "Greater Austin",
+      "Metro Detroit",
+      "Greater New York",
+      "Greater Miami",
+      "Greater San Diego",
+      "Greater Portland",
+      "Puget Sound",
+      "Rocky Mountain Region",
+      "Midwest",
+      "Pacific Northwest",
+      "New York Metro",
+      "Tri-Valley"
+    ]
+  },
+  CA: {
+    regions: [
+      "Alberta",
+      "British Columbia",
+      "Manitoba",
+      "New Brunswick",
+      "Newfoundland and Labrador|Newfoundland",
+      "Nova Scotia",
+      "Ontario",
+      "Prince Edward Island|PEI",
+      "Quebec|Qu\xE9bec",
+      "Saskatchewan",
+      "Northwest Territories",
+      "Nunavut",
+      "Yukon"
+    ],
+    regionCodes: ["AB", "BC", "MB", "NB", "NL", "NS", "ON", "PE", "QC", "SK", "NT", "NU", "YT"],
+    cities: [
+      "Toronto",
+      "Montreal|Montr\xE9al",
+      "Vancouver",
+      "Calgary",
+      "Edmonton",
+      "Ottawa",
+      "Winnipeg",
+      "Mississauga",
+      "Brampton",
+      "Hamilton",
+      "Surrey",
+      "Halifax",
+      "Laval",
+      "London",
+      "Markham",
+      "Vaughan",
+      "Gatineau",
+      "Saskatoon",
+      "Kitchener",
+      "Waterloo",
+      "Longueuil",
+      "Burnaby",
+      "Regina",
+      "Richmond",
+      "Richmond Hill",
+      "Oakville",
+      "Burlington",
+      "Sherbrooke",
+      "Oshawa",
+      "Greater Sudbury|Sudbury",
+      "Saguenay",
+      "L\xE9vis|Levis",
+      "Barrie",
+      "Abbotsford",
+      "Coquitlam",
+      "Trois-Rivi\xE8res|Trois Rivieres",
+      "St Catharines|Saint Catharines",
+      "Guelph",
+      "Cambridge",
+      "Whitby",
+      "Kelowna",
+      "Kingston",
+      "Ajax",
+      "Langley",
+      "Thunder Bay",
+      "Chatham",
+      "Delta",
+      "Red Deer",
+      "Kamloops",
+      "Brantford",
+      "Cape Breton",
+      "Lethbridge",
+      "Saint-Jean-sur-Richelieu|Saint Jean sur Richelieu",
+      "Clarington",
+      "Pickering",
+      "Nanaimo",
+      "Chilliwack",
+      "Maple Ridge",
+      "New Westminster",
+      "North Vancouver",
+      "West Vancouver",
+      "Port Coquitlam",
+      "Moncton",
+      "Fredericton",
+      "Saint John",
+      "St Johns|Saint Johns",
+      "Charlottetown",
+      "Dartmouth",
+      "Sydney",
+      "Quebec City|Ville de Qu\xE9bec|Ville de Quebec",
+      "Drummondville",
+      "Granby",
+      "Brossard",
+      "Terrebonne",
+      "Repentigny",
+      "Blainville",
+      "Milton",
+      "Newmarket",
+      "Aurora",
+      "Peterborough",
+      "Belleville",
+      "Sarnia",
+      "Niagara Falls",
+      "Welland",
+      "North Bay",
+      "Timmins",
+      "Cornwall",
+      "Woodstock",
+      "Stratford",
+      "Orillia",
+      "Bradford",
+      "Medicine Hat",
+      "Grande Prairie",
+      "Fort McMurray",
+      "Airdrie",
+      "Prince George",
+      "Prince Albert",
+      "Moose Jaw",
+      "Brandon",
+      "Whitehorse",
+      "Yellowknife",
+      "Iqaluit",
+      "Victoria",
+      "Whistler",
+      "Squamish",
+      "Windsor",
+      "Etobicoke",
+      "Scarborough",
+      "North York",
+      "Truro",
+      "Hull",
+      "Kirkland",
+      "White Rock",
+      "Georgetown",
+      "Paris",
+      "Perth",
+      "Bathurst",
+      "Bolton",
+      "Collingwood",
+      "Saanich",
+      "Sidney",
+      "Mont-Tremblant|Mont Tremblant",
+      "Boucherville",
+      "Dorval",
+      "Pointe-Claire|Pointe Claire",
+      "Saint-Laurent|Saint Laurent|Ville Saint-Laurent",
+      "Anjou",
+      "Verdun",
+      "Westmount",
+      "Outremont",
+      "Lachine",
+      "LaSalle|Lasalle",
+      "Rimouski",
+      "Chicoutimi",
+      "Rouyn-Noranda|Rouyn Noranda",
+      "Val-d'Or|Val dOr",
+      "Sept-\xCEles|Sept Iles",
+      "Baie-Comeau|Baie Comeau",
+      "Shawinigan",
+      "Victoriaville",
+      "Saint-Hyacinthe|Saint Hyacinthe",
+      "Joliette",
+      "Sorel-Tracy|Sorel Tracy",
+      "Magog",
+      "Thetford Mines",
+      "Rivi\xE8re-du-Loup|Riviere du Loup",
+      "Stoney Creek",
+      "Ancaster",
+      "Dundas",
+      "Grimsby",
+      "Oakville",
+      "Halton Hills",
+      "Caledon",
+      "Innisfil",
+      "Orangeville",
+      "Alliston",
+      "Owen Sound",
+      "Kincardine",
+      "Goderich",
+      "Cobourg",
+      "Port Hope",
+      "Lindsay",
+      "Kawartha Lakes",
+      "Brockville",
+      "Pembroke",
+      "Petawawa",
+      "Kanata",
+      "Nepean",
+      "Orleans|Orl\xE9ans",
+      "Gloucester",
+      "Leamington",
+      "Tecumseh",
+      "LaSalle",
+      "Amherstburg",
+      "Strathroy",
+      "St Thomas|Saint Thomas",
+      "Tillsonburg",
+      "Ingersoll",
+      "Simcoe",
+      "Port Colborne",
+      "Fort Erie",
+      "Thorold",
+      "Waterdown",
+      "Milton",
+      "Uxbridge",
+      "Stouffville|Whitchurch-Stouffville",
+      "Aurora",
+      "King City",
+      "Bradford West Gwillimbury",
+      "Barrhaven",
+      "Sherwood Park",
+      "St Albert|Saint Albert",
+      "Spruce Grove",
+      "Leduc",
+      "Okotoks",
+      "Cochrane",
+      "Canmore",
+      "Banff",
+      "Jasper",
+      "Lloydminster",
+      "Camrose",
+      "Wetaskiwin",
+      "Brooks",
+      "Strathmore",
+      "Chestermere",
+      "Swift Current",
+      "Yorkton",
+      "North Battleford",
+      "Estevan",
+      "Weyburn",
+      "Portage la Prairie",
+      "Steinbach",
+      "Thompson",
+      "Selkirk",
+      "Winkler",
+      "Morden",
+      "Vernon",
+      "Penticton",
+      "Kelowna",
+      "West Kelowna",
+      "Courtenay",
+      "Campbell River",
+      "Duncan",
+      "Parksville",
+      "Port Alberni",
+      "Powell River",
+      "Prince Rupert",
+      "Terrace",
+      "Fort St John|Fort Saint John",
+      "Dawson Creek",
+      "Cranbrook",
+      "Nelson",
+      "Trail",
+      "Castlegar",
+      "Salmon Arm",
+      "Williams Lake",
+      "Quesnel",
+      "Mission",
+      "Pitt Meadows",
+      "Port Moody",
+      "Ladner",
+      "Tsawwassen",
+      "Bedford",
+      "Sackville",
+      "Wolfville",
+      "Kentville",
+      "Bridgewater",
+      "Yarmouth",
+      "Antigonish",
+      "New Glasgow",
+      "Amherst",
+      "Riverview",
+      "Dieppe",
+      "Miramichi",
+      "Edmundston",
+      "Campbellton",
+      "Summerside",
+      "Stratford",
+      "Mount Pearl",
+      "Corner Brook",
+      "Gander",
+      "Grand Falls-Windsor|Grand Falls Windsor",
+      "Labrador City",
+      "Happy Valley-Goose Bay|Goose Bay"
+    ],
+    metros: [
+      "Greater Toronto Area|Greater Toronto|GTA",
+      "Greater Montreal|Grand Montr\xE9al|Grand Montreal",
+      "Greater Vancouver|Metro Vancouver",
+      "Lower Mainland",
+      "Kitchener-Waterloo",
+      "Region of Waterloo|Waterloo Region",
+      "Golden Horseshoe",
+      "Durham Region",
+      "Peel Region",
+      "York Region",
+      "Halton Region",
+      "Niagara Region",
+      "Okanagan",
+      "National Capital Region",
+      "Greater Sudbury Area",
+      "Greater Halifax",
+      "Halifax Regional Municipality|HRM",
+      "Metro Calgary|Calgary Region",
+      "Metro Edmonton|Edmonton Metropolitan Region",
+      "Capital Region",
+      "Fraser Valley",
+      "Vancouver Island",
+      "Greater Victoria",
+      "Atlantic Canada",
+      "Maritimes",
+      "Prairies",
+      "Western Canada",
+      "Eastern Canada",
+      "Northern Ontario",
+      "Southwestern Ontario",
+      "Eastern Ontario",
+      "Ottawa-Gatineau|Ottawa Gatineau",
+      "Mont\xE9r\xE9gie|Monteregie",
+      "Laurentides|Laurentians",
+      "Estrie|Eastern Townships",
+      "Mauricie",
+      "Outaouais",
+      "Gasp\xE9sie|Gaspesie",
+      "C\xF4te-Nord|Cote Nord",
+      "Abitibi",
+      "Bas-Saint-Laurent|Bas Saint Laurent",
+      "Saguenay-Lac-Saint-Jean|Saguenay Lac Saint Jean",
+      "Chaudi\xE8re-Appalaches|Chaudiere Appalaches",
+      "Tri-Cities BC",
+      "North Shore Vancouver",
+      "Kootenays",
+      "Cariboo",
+      "Peace Region",
+      "Thompson-Okanagan|Thompson Okanagan"
+    ]
+  },
+  AU: {
+    regions: [
+      "New South Wales",
+      "Victoria",
+      "Queensland",
+      "Western Australia",
+      "South Australia",
+      "Tasmania",
+      "Australian Capital Territory",
+      "Northern Territory"
+    ],
+    regionCodes: ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
+    cities: [
+      "Sydney",
+      "Melbourne",
+      "Brisbane",
+      "Perth",
+      "Adelaide",
+      "Gold Coast",
+      "Canberra",
+      "Newcastle",
+      "Wollongong",
+      "Sunshine Coast",
+      "Hobart",
+      "Geelong",
+      "Townsville",
+      "Cairns",
+      "Toowoomba",
+      "Darwin",
+      "Ballarat",
+      "Bendigo",
+      "Albury|Albury-Wodonga|Albury Wodonga",
+      "Wodonga",
+      "Launceston",
+      "Mackay",
+      "Rockhampton",
+      "Bunbury",
+      "Bundaberg",
+      "Coffs Harbour",
+      "Wagga Wagga|Wagga",
+      "Hervey Bay",
+      "Mildura",
+      "Shepparton",
+      "Gladstone",
+      "Port Macquarie",
+      "Tamworth",
+      "Dubbo",
+      "Geraldton",
+      "Nowra",
+      "Bathurst",
+      "Warrnambool",
+      "Kalgoorlie",
+      "Alice Springs",
+      "Broome",
+      "Mount Gambier",
+      "Lismore",
+      "Armidale",
+      "Whyalla",
+      "Devonport",
+      "Burnie",
+      "Traralgon",
+      "Morwell",
+      "Bairnsdale",
+      "Sale",
+      "Horsham",
+      "Wangaratta",
+      "Echuca",
+      "Swan Hill",
+      "Griffith",
+      "Goulburn",
+      "Bowral",
+      "Queanbeyan",
+      "Orange NSW",
+      "Mudgee",
+      "Broken Hill",
+      "Byron Bay",
+      "Tweed Heads",
+      "Ballina",
+      "Grafton",
+      "Taree",
+      "Forster",
+      "Maitland",
+      "Cessnock",
+      "Singleton",
+      "Muswellbrook",
+      "Gosford",
+      "Wyong",
+      "Tuggerah",
+      "Erina",
+      "Katoomba",
+      "Penrith",
+      "Parramatta",
+      "Liverpool",
+      "Blacktown",
+      "Campbelltown",
+      "Camden NSW",
+      "Bankstown",
+      "Hurstville",
+      "Sutherland",
+      "Cronulla",
+      "Miranda",
+      "Kogarah",
+      "Rockdale",
+      "Mascot",
+      "Botany",
+      "Randwick",
+      "Bondi",
+      "Bondi Junction",
+      "Double Bay",
+      "Manly",
+      "Dee Why",
+      "Brookvale",
+      "Frenchs Forest",
+      "Hornsby",
+      "Ryde",
+      "Macquarie Park",
+      "North Ryde",
+      "Chatswood",
+      "St Leonards|Saint Leonards",
+      "North Sydney",
+      "Crows Nest",
+      "Artarmon",
+      "Lane Cove",
+      "Epping",
+      "Castle Hill",
+      "Norwest",
+      "Baulkham Hills",
+      "Bella Vista",
+      "Rhodes",
+      "Olympic Park|Sydney Olympic Park",
+      "Homebush",
+      "Strathfield",
+      "Burwood",
+      "Ashfield",
+      "Marrickville",
+      "Newtown",
+      "Alexandria NSW",
+      "Redfern",
+      "Surry Hills",
+      "Pyrmont",
+      "Ultimo",
+      "Barangaroo",
+      "Darling Harbour",
+      "Haymarket",
+      "Circular Quay",
+      "The Rocks",
+      "Zetland",
+      "Waterloo NSW",
+      "Rosebery",
+      "Eveleigh",
+      "Chippendale",
+      "Glebe",
+      "Leichhardt",
+      "Balmain",
+      "Docklands",
+      "Southbank",
+      "South Melbourne",
+      "Port Melbourne",
+      "St Kilda|Saint Kilda",
+      "Richmond",
+      "Cremorne",
+      "Abbotsford",
+      "Collingwood",
+      "Fitzroy",
+      "Carlton",
+      "Brunswick",
+      "Coburg",
+      "Preston",
+      "Northcote",
+      "Thornbury",
+      "Heidelberg",
+      "Bundoora",
+      "Doncaster",
+      "Box Hill",
+      "Ringwood",
+      "Hawthorn",
+      "Camberwell",
+      "Kew",
+      "Malvern",
+      "Prahran",
+      "South Yarra",
+      "Toorak",
+      "Brighton",
+      "Caulfield",
+      "Moorabbin",
+      "Cheltenham",
+      "Mentone",
+      "Frankston",
+      "Dandenong",
+      "Clayton",
+      "Mulgrave",
+      "Notting Hill",
+      "Glen Waverley",
+      "Mount Waverley",
+      "Burwood East",
+      "Nunawading",
+      "Bayswater",
+      "Knox",
+      "Scoresby",
+      "Rowville",
+      "Berwick",
+      "Cranbourne",
+      "Pakenham",
+      "Werribee",
+      "Point Cook",
+      "Sunshine",
+      "Footscray",
+      "Essendon",
+      "Tullamarine",
+      "Broadmeadows",
+      "Craigieburn",
+      "Epping VIC",
+      "Mernda",
+      "Sunbury",
+      "Melton",
+      "Laverton",
+      "Altona",
+      "Williamstown",
+      "Fortitude Valley",
+      "Newstead",
+      "Teneriffe",
+      "Bowen Hills",
+      "Spring Hill",
+      "Milton QLD",
+      "Toowong",
+      "Indooroopilly",
+      "St Lucia|Saint Lucia",
+      "West End",
+      "South Brisbane",
+      "Woolloongabba",
+      "Kangaroo Point",
+      "Hamilton QLD",
+      "Ascot",
+      "Chermside",
+      "Eight Mile Plains",
+      "Upper Mount Gravatt",
+      "Mount Gravatt",
+      "Sunnybank",
+      "Springwood",
+      "Logan",
+      "Beenleigh",
+      "Ipswich",
+      "Springfield QLD",
+      "Redcliffe",
+      "Caboolture",
+      "North Lakes",
+      "Strathpine",
+      "Cleveland QLD",
+      "Capalaba",
+      "Wynnum",
+      "Southport",
+      "Surfers Paradise",
+      "Broadbeach",
+      "Robina",
+      "Varsity Lakes",
+      "Burleigh Heads",
+      "Coolangatta",
+      "Nerang",
+      "Helensvale",
+      "Coomera",
+      "Maroochydore",
+      "Caloundra",
+      "Noosa",
+      "Nambour",
+      "Kawana",
+      "Fremantle",
+      "Joondalup",
+      "Subiaco",
+      "West Perth",
+      "East Perth",
+      "Osborne Park",
+      "Malaga",
+      "Balcatta",
+      "Belmont WA",
+      "Welshpool",
+      "Canning Vale",
+      "Bibra Lake",
+      "Cockburn",
+      "Rockingham",
+      "Mandurah",
+      "Midland",
+      "Armadale",
+      "Cannington",
+      "Victoria Park",
+      "Burswood",
+      "Nedlands",
+      "Claremont",
+      "Cottesloe",
+      "Scarborough WA",
+      "Wanneroo",
+      "Ellenbrook",
+      "Kwinana",
+      "Bunbury",
+      "Busselton",
+      "Margaret River",
+      "Albany",
+      "Esperance",
+      "Karratha",
+      "Port Hedland",
+      "Newman",
+      "Tom Price",
+      "Glenelg",
+      "Norwood",
+      "Mawson Lakes",
+      "Elizabeth",
+      "Salisbury",
+      "Modbury",
+      "Tea Tree Gully",
+      "Marion",
+      "Noarlunga",
+      "Mount Barker",
+      "Port Adelaide",
+      "Prospect",
+      "Unley",
+      "Kent Town",
+      "Tonsley",
+      "Bedford Park",
+      "Belconnen",
+      "Woden",
+      "Tuggeranong",
+      "Fyshwick",
+      "Gungahlin",
+      "Barton",
+      "Braddon",
+      "Kingston",
+      "Deakin",
+      "Bruce",
+      "Mitchell",
+      "Hume",
+      "Symonston",
+      "Palmerston NT",
+      "Casuarina",
+      "Katherine",
+      "Nhulunbuy",
+      "Tennant Creek",
+      "Kingston TAS",
+      "Glenorchy",
+      "Clarence",
+      "Sandy Bay",
+      "Moonah",
+      "Bellerive",
+      "Ulverstone",
+      "Wynyard",
+      "Smithton"
+    ],
+    metros: [
+      "Greater Sydney",
+      "Greater Melbourne",
+      "Greater Brisbane",
+      "Greater Perth",
+      "Greater Adelaide",
+      "Greater Hobart",
+      "Greater Darwin",
+      "South East Queensland|SEQ",
+      "Illawarra",
+      "Hunter Region|Hunter Valley|Hunter",
+      "Northern Rivers",
+      "Riverina",
+      "Gippsland",
+      "Barossa|Barossa Valley",
+      "Pilbara",
+      "Goldfields WA",
+      "Central Coast NSW",
+      "Western Sydney",
+      "Inner West",
+      "Sydney CBD",
+      "Melbourne CBD",
+      "Brisbane CBD",
+      "Perth CBD",
+      "Adelaide CBD",
+      "Northern Beaches",
+      "Eastern Suburbs",
+      "Hills District",
+      "Sutherland Shire",
+      "Macarthur",
+      "Blue Mountains",
+      "Mornington Peninsula",
+      "Yarra Valley",
+      "Latrobe Valley",
+      "Geelong Region",
+      "Bellarine",
+      "Surf Coast",
+      "Wimmera",
+      "Mallee",
+      "Goulburn Valley",
+      "Darling Downs",
+      "Wide Bay",
+      "Fraser Coast",
+      "Whitsundays",
+      "Far North Queensland",
+      "North Queensland",
+      "Central Queensland",
+      "Moreton Bay",
+      "Redlands",
+      "Ipswich Region",
+      "Great Southern",
+      "South West WA",
+      "Wheatbelt",
+      "Mid West WA",
+      "Kimberley WA",
+      "Fleurieu Peninsula",
+      "Adelaide Hills",
+      "Eyre Peninsula",
+      "Yorke Peninsula",
+      "Limestone Coast",
+      "Riverland",
+      "Top End",
+      "Red Centre",
+      "Central Australia",
+      "Tasman Peninsula",
+      "North West Tasmania",
+      "Regional NSW",
+      "Regional Victoria",
+      "Regional Queensland",
+      "Regional WA",
+      "Regional SA",
+      "Regional Australia"
+    ]
+  },
+  GB: {
+    regions: [
+      "England",
+      "Scotland",
+      "Wales",
+      "Northern Ireland",
+      "Greater London",
+      "Greater Manchester",
+      "West Midlands",
+      "West Yorkshire",
+      "South Yorkshire",
+      "North Yorkshire",
+      "East Riding of Yorkshire|East Riding",
+      "Yorkshire",
+      "Merseyside",
+      "Tyne and Wear",
+      "Berkshire",
+      "Hampshire",
+      "Surrey",
+      "Kent",
+      "Essex",
+      "Hertfordshire",
+      "Oxfordshire",
+      "Cambridgeshire",
+      "Buckinghamshire",
+      "Bedfordshire",
+      "Wiltshire",
+      "Somerset",
+      "Devon",
+      "Cornwall",
+      "Dorset",
+      "Gloucestershire",
+      "Warwickshire",
+      "Leicestershire",
+      "Nottinghamshire",
+      "Derbyshire",
+      "Staffordshire",
+      "Cheshire",
+      "Lancashire",
+      "Cumbria",
+      "Northumberland",
+      "County Durham",
+      "Durham",
+      "East Sussex",
+      "West Sussex",
+      "Sussex",
+      "Norfolk",
+      "Suffolk",
+      "Lincolnshire",
+      "Shropshire",
+      "Herefordshire",
+      "Worcestershire",
+      "Northamptonshire",
+      "Rutland",
+      "Isle of Wight",
+      "Fife",
+      "Lothian",
+      "Midlothian",
+      "West Lothian",
+      "East Lothian",
+      "Lanarkshire",
+      "North Lanarkshire",
+      "South Lanarkshire",
+      "Renfrewshire",
+      "Ayrshire",
+      "Aberdeenshire",
+      "Perthshire",
+      "Perth and Kinross",
+      "Stirlingshire",
+      "Dumfries and Galloway",
+      "Argyll and Bute",
+      "Moray",
+      "Scottish Borders",
+      "Scottish Highlands",
+      "Gwynedd",
+      "Powys",
+      "Ceredigion",
+      "Conwy",
+      "Flintshire",
+      "Denbighshire",
+      "Anglesey",
+      "Glamorgan",
+      "Vale of Glamorgan",
+      "Monmouthshire",
+      "Pembrokeshire",
+      "Carmarthenshire",
+      "Rhondda Cynon Taf",
+      "County Antrim|Antrim",
+      "County Down",
+      "County Armagh|Armagh",
+      "County Tyrone|Tyrone",
+      "County Fermanagh|Fermanagh",
+      "County Londonderry|County Derry"
+    ],
+    regionCodes: [],
+    cities: [
+      "London",
+      "Birmingham",
+      "Manchester",
+      "Leeds",
+      "Glasgow",
+      "Edinburgh",
+      "Liverpool",
+      "Bristol",
+      "Sheffield",
+      "Newcastle upon Tyne|Newcastle-upon-Tyne",
+      "Newcastle",
+      "Nottingham",
+      "Leicester",
+      "Coventry",
+      "Bradford",
+      "Cardiff",
+      "Belfast",
+      "Southampton",
+      "Portsmouth",
+      "Brighton",
+      "Brighton and Hove",
+      "Hove",
+      "Plymouth",
+      "Reading",
+      "Milton Keynes",
+      "Cambridge",
+      "Oxford",
+      "Bath",
+      "York",
+      "Exeter",
+      "Norwich",
+      "Ipswich",
+      "Derby",
+      "Stoke-on-Trent|Stoke on Trent|Stoke",
+      "Wolverhampton",
+      "Sunderland",
+      "Middlesbrough",
+      "Kingston upon Hull|Hull",
+      "Swansea",
+      "Aberdeen",
+      "Dundee",
+      "Inverness",
+      "Stirling",
+      "Perth",
+      "Luton",
+      "Slough",
+      "Watford",
+      "Basingstoke",
+      "Guildford",
+      "Woking",
+      "Crawley",
+      "Maidenhead",
+      "Bracknell",
+      "Swindon",
+      "Cheltenham",
+      "Gloucester",
+      "Bournemouth",
+      "Poole",
+      "Salisbury",
+      "Winchester",
+      "Chichester",
+      "Worthing",
+      "Eastbourne",
+      "Hastings",
+      "Canterbury",
+      "Maidstone",
+      "Ashford",
+      "Dartford",
+      "Croydon",
+      "Bromley",
+      "Kingston upon Thames|Kingston-upon-Thames",
+      "Kingston",
+      "Richmond upon Thames|Richmond-upon-Thames",
+      "Richmond",
+      "Wimbledon",
+      "Twickenham",
+      "Hounslow",
+      "Ealing",
+      "Harrow",
+      "Uxbridge",
+      "Wembley",
+      "Stratford",
+      "Shoreditch",
+      "Hoxton",
+      "Clerkenwell",
+      "Farringdon",
+      "Holborn",
+      "Soho",
+      "Mayfair",
+      "Marylebone",
+      "Paddington",
+      "Kensington",
+      "Chelsea",
+      "Fulham",
+      "Hammersmith",
+      "Chiswick",
+      "Battersea",
+      "Vauxhall",
+      "Southwark",
+      "Bermondsey",
+      "London Bridge",
+      "Liverpool Street",
+      "Kings Cross|King's Cross",
+      "Euston",
+      "Camden",
+      "Islington",
+      "Hackney",
+      "Greenwich",
+      "Docklands",
+      "Westminster",
+      "Wandsworth",
+      "Lewisham",
+      "Brixton",
+      "Clapham",
+      "Putney",
+      "Sutton",
+      "Barnet",
+      "Enfield",
+      "Ilford",
+      "Romford",
+      "Dagenham",
+      "Woolwich",
+      "Heathrow",
+      "Gatwick",
+      "Stansted",
+      "St Albans|Saint Albans",
+      "Hemel Hempstead",
+      "Stevenage",
+      "Welwyn Garden City",
+      "Hatfield",
+      "Harlow",
+      "Chelmsford",
+      "Colchester",
+      "Southend|Southend-on-Sea|Southend on Sea",
+      "Basildon",
+      "Brentwood",
+      "Bedford",
+      "Northampton",
+      "Kettering",
+      "Corby",
+      "Peterborough",
+      "Huntingdon",
+      "Ely",
+      "Newmarket",
+      "Bury St Edmunds|Bury Saint Edmunds",
+      "Lowestoft",
+      "Great Yarmouth",
+      "Kings Lynn|King's Lynn",
+      "Lincoln",
+      "Grimsby",
+      "Scunthorpe",
+      "Doncaster",
+      "Rotherham",
+      "Barnsley",
+      "Wakefield",
+      "Huddersfield",
+      "Halifax",
+      "Harrogate",
+      "Scarborough",
+      "Stockton-on-Tees|Stockton on Tees",
+      "Darlington",
+      "Hartlepool",
+      "Gateshead",
+      "South Shields",
+      "Carlisle",
+      "Kendal",
+      "Lancaster",
+      "Preston",
+      "Blackpool",
+      "Blackburn",
+      "Burnley",
+      "Bolton",
+      "Bury",
+      "Wigan",
+      "Warrington",
+      "Widnes",
+      "Runcorn",
+      "St Helens|Saint Helens",
+      "Southport",
+      "Birkenhead",
+      "Wirral",
+      "Chester",
+      "Crewe",
+      "Macclesfield",
+      "Stockport",
+      "Oldham",
+      "Rochdale",
+      "Salford",
+      "Trafford",
+      "Altrincham",
+      "Sale",
+      "Wilmslow",
+      "Knutsford",
+      "Stafford",
+      "Telford",
+      "Shrewsbury",
+      "Hereford",
+      "Worcester",
+      "Kidderminster",
+      "Redditch",
+      "Bromsgrove",
+      "Solihull",
+      "Dudley",
+      "Walsall",
+      "West Bromwich",
+      "Sutton Coldfield",
+      "Tamworth",
+      "Lichfield",
+      "Burton upon Trent|Burton on Trent",
+      "Nuneaton",
+      "Leamington Spa|Royal Leamington Spa|Leamington",
+      "Warwick",
+      "Stratford-upon-Avon|Stratford upon Avon",
+      "Loughborough",
+      "Chesterfield",
+      "Mansfield",
+      "Newark",
+      "Grantham",
+      "Boston",
+      "Skegness",
+      "Northwich",
+      "Wrexham",
+      "Bangor",
+      "Llandudno",
+      "Aberystwyth",
+      "Carmarthen",
+      "Llanelli",
+      "Neath",
+      "Port Talbot",
+      "Bridgend",
+      "Pontypridd",
+      "Merthyr Tydfil",
+      "Caerphilly",
+      "Cwmbran",
+      "Newport",
+      "Abergavenny",
+      "Monmouth",
+      "Chepstow",
+      "Paisley",
+      "East Kilbride",
+      "Livingston",
+      "Cumbernauld",
+      "Hamilton",
+      "Motherwell",
+      "Kilmarnock",
+      "Ayr",
+      "Irvine",
+      "Greenock",
+      "Dunfermline",
+      "Kirkcaldy",
+      "Falkirk",
+      "Dumfries",
+      "Elgin",
+      "Fort William",
+      "Oban",
+      "Lisburn",
+      "Newry",
+      "Newtownabbey",
+      "Carrickfergus",
+      "Ballymena",
+      "Coleraine",
+      "Omagh",
+      "Enniskillen",
+      "Craigavon",
+      "Lurgan",
+      "Portadown",
+      "Derry|Londonderry",
+      "Epping",
+      "Horsham",
+      "Malvern",
+      "Penrith",
+      "Bayswater",
+      "Camberwell",
+      "Kew",
+      "Notting Hill",
+      "Haymarket",
+      "Newstead",
+      "Ascot",
+      "Welshpool",
+      "Cranbrook",
+      "Yarmouth",
+      "Pembroke",
+      "Berwick|Berwick-upon-Tweed",
+      "Melton Mowbray",
+      "West End",
+      "Windsor",
+      "Eton",
+      "Egham",
+      "Staines",
+      "Weybridge",
+      "Leatherhead",
+      "Epsom",
+      "Redhill",
+      "Reigate",
+      "Dorking"
+    ],
+    metros: [
+      "Tyneside",
+      "Teesside",
+      "Humberside",
+      "Thames Valley",
+      "Home Counties",
+      "M4 Corridor",
+      "Silicon Fen",
+      "City of London|Square Mile",
+      "Canary Wharf",
+      "North West England",
+      "North East England",
+      "South West England",
+      "South East England",
+      "East of England",
+      "East Anglia",
+      "East Midlands",
+      "West Country",
+      "Central Belt",
+      "South Wales",
+      "North Wales",
+      "Mid Wales",
+      "West Wales",
+      "Black Country",
+      "Potteries",
+      "Peak District",
+      "Lake District",
+      "Cotswolds",
+      "Midlands",
+      "Northern England",
+      "Southern England",
+      "Central London",
+      "North London",
+      "South London",
+      "East London",
+      "West London",
+      "Greater Glasgow",
+      "Greater Belfast",
+      "Greater Bristol",
+      "Greater Nottingham",
+      "Greater Cambridge",
+      "Oxford-Cambridge Arc|Oxford Cambridge Arc"
+    ]
+  },
+  IN: {
+    regions: [
+      "Andhra Pradesh",
+      "Arunachal Pradesh",
+      "Assam",
+      "Bihar",
+      "Chhattisgarh",
+      "Goa",
+      "Gujarat",
+      "Haryana",
+      "Himachal Pradesh",
+      "Jharkhand",
+      "Karnataka",
+      "Kerala",
+      "Madhya Pradesh",
+      "Maharashtra",
+      "Manipur",
+      "Meghalaya",
+      "Mizoram",
+      "Nagaland",
+      "Odisha|Orissa",
+      "Punjab",
+      "Rajasthan",
+      "Sikkim",
+      "Tamil Nadu|Tamilnadu",
+      "Telangana",
+      "Tripura",
+      "Uttar Pradesh",
+      "Uttarakhand|Uttaranchal",
+      "West Bengal",
+      "Andaman and Nicobar Islands|Andaman and Nicobar",
+      "Chandigarh",
+      "Dadra and Nagar Haveli and Daman and Diu|Dadra and Nagar Haveli|Daman and Diu",
+      "Delhi|NCT of Delhi|National Capital Territory of Delhi",
+      "Jammu and Kashmir|Jammu & Kashmir",
+      "Ladakh",
+      "Lakshadweep",
+      "Puducherry|Pondicherry"
+    ],
+    // Only codes postings actually use. Codes that collide with US/CA state
+    // codes nobody writes for India (GA, OR, LA, NL, SK, CT, AR, AS, MN) are
+    // left out so the US/CA reading keeps working; TN is kept because both
+    // "Chennai, TN" and "Nashville, TN" are common.
+    regionCodes: [
+      "KA",
+      "MH",
+      "TN",
+      "TS",
+      "TG",
+      "DL",
+      "UP",
+      "HR",
+      "GJ",
+      "WB",
+      "KL",
+      "RJ",
+      "AP",
+      "MP",
+      "PB",
+      "OD",
+      "BR",
+      "JH",
+      "CG",
+      "HP",
+      "CH",
+      "PY",
+      "JK"
+    ],
+    cities: [
+      "Mumbai|Bombay",
+      "New Delhi",
+      "Bengaluru|Bangalore",
+      "Hyderabad",
+      "Ahmedabad",
+      "Chennai|Madras",
+      "Kolkata|Calcutta",
+      "Surat",
+      "Pune|Poona",
+      "Jaipur",
+      "Lucknow",
+      "Kanpur",
+      "Nagpur",
+      "Indore",
+      "Thane",
+      "Bhopal",
+      "Visakhapatnam|Vizag|Vishakhapatnam",
+      "Pimpri-Chinchwad|Pimpri Chinchwad|Pimpri",
+      "Patna",
+      "Vadodara|Baroda",
+      "Ghaziabad",
+      "Ludhiana",
+      "Agra",
+      "Nashik|Nasik",
+      "Faridabad",
+      "Meerut",
+      "Rajkot",
+      "Varanasi|Benares",
+      "Srinagar",
+      "Aurangabad|Chhatrapati Sambhajinagar",
+      "Dhanbad",
+      "Amritsar",
+      "Navi Mumbai",
+      "Prayagraj|Allahabad",
+      "Ranchi",
+      "Howrah",
+      "Coimbatore",
+      "Jabalpur",
+      "Gwalior",
+      "Vijayawada",
+      "Jodhpur",
+      "Madurai",
+      "Raipur",
+      "Kota",
+      "Guwahati",
+      "Solapur",
+      "Hubli|Hubballi",
+      "Hubli-Dharwad|Hubballi-Dharwad",
+      "Dharwad",
+      "Mysuru|Mysore",
+      "Tiruchirappalli|Trichy|Tiruchirapalli",
+      "Bareilly",
+      "Aligarh",
+      "Tiruppur|Tirupur",
+      "Moradabad",
+      "Jalandhar",
+      "Bhubaneswar|Bhubaneshwar",
+      "Salem",
+      "Warangal",
+      "Guntur",
+      "Bhiwandi",
+      "Saharanpur",
+      "Gorakhpur",
+      "Bikaner",
+      "Amravati",
+      "Noida",
+      "Greater Noida",
+      "Jamshedpur",
+      "Bhilai",
+      "Cuttack",
+      "Firozabad",
+      "Kochi|Cochin",
+      "Nellore",
+      "Bhavnagar",
+      "Dehradun",
+      "Durgapur",
+      "Asansol",
+      "Rourkela",
+      "Nanded",
+      "Kolhapur",
+      "Ajmer",
+      "Akola",
+      "Kalaburagi|Gulbarga",
+      "Jamnagar",
+      "Ujjain",
+      "Siliguri",
+      "Jhansi",
+      "Ulhasnagar",
+      "Jammu",
+      "Sangli",
+      "Mangaluru|Mangalore",
+      "Erode",
+      "Belagavi|Belgaum",
+      "Ambattur",
+      "Tirunelveli",
+      "Malegaon",
+      "Udaipur",
+      "Thiruvananthapuram|Trivandrum",
+      "Kozhikode|Calicut",
+      "Thrissur|Trichur",
+      "Kollam|Quilon",
+      "Gurugram|Gurgaon",
+      "Mohali|SAS Nagar|Sahibzada Ajit Singh Nagar",
+      "Panchkula",
+      "Panaji|Panjim",
+      "Shimla",
+      "Manesar",
+      "Vellore",
+      "Hosur",
+      "Kakinada",
+      "Tirupati",
+      "Anand",
+      "Gandhinagar",
+      "Rajahmundry",
+      "Kharagpur",
+      "Roorkee",
+      "Kanchipuram",
+      "Karnal",
+      "Ambala",
+      "Hisar",
+      "Rohtak",
+      "Sonipat|Sonepat",
+      "Bhiwadi",
+      "Dharamshala|Dharamsala",
+      "Haridwar",
+      "Rishikesh",
+      "Mathura",
+      "Vrindavan",
+      "Bhagalpur",
+      "Muzaffarpur",
+      "Gaya",
+      "Darbhanga",
+      "Bokaro|Bokaro Steel City",
+      "Hazaribagh",
+      "Sambalpur",
+      "Berhampur|Brahmapur",
+      "Puri",
+      "Imphal",
+      "Shillong",
+      "Aizawl",
+      "Agartala",
+      "Kohima",
+      "Dimapur",
+      "Itanagar",
+      "Gangtok",
+      "Dibrugarh",
+      "Silchar",
+      "Jorhat",
+      "Tezpur",
+      "Nagaon",
+      "Thanjavur",
+      "Dindigul",
+      "Karur",
+      "Namakkal",
+      "Thoothukudi|Tuticorin",
+      "Nagercoil",
+      "Kanyakumari",
+      "Cuddalore",
+      "Pondicherry",
+      "Hosur",
+      "Krishnagiri",
+      "Chittoor",
+      "Anantapur",
+      "Kurnool",
+      "Kadapa",
+      "Ongole",
+      "Eluru",
+      "Bhimavaram",
+      "Machilipatnam",
+      "Srikakulam",
+      "Vizianagaram",
+      "Karimnagar",
+      "Nizamabad",
+      "Khammam",
+      "Mahbubnagar",
+      "Nalgonda",
+      "Secunderabad",
+      "Cyberabad",
+      "Davanagere|Davangere",
+      "Shivamogga|Shimoga",
+      "Tumakuru|Tumkur",
+      "Ballari|Bellary",
+      "Vijayapura|Bijapur",
+      "Udupi",
+      "Manipal",
+      "Hassan",
+      "Mandya",
+      "Chikkamagaluru|Chikmagalur",
+      "Kolar",
+      "Raichur",
+      "Bidar",
+      "Alappuzha|Alleppey",
+      "Kottayam",
+      "Kannur|Cannanore",
+      "Palakkad|Palghat",
+      "Malappuram",
+      "Pathanamthitta",
+      "Idukki",
+      "Wayanad",
+      "Kasaragod",
+      "Ernakulam",
+      "Kakkanad",
+      "Infopark",
+      "Technopark",
+      "Aurangabad",
+      "Latur",
+      "Ahmednagar|Ahilyanagar",
+      "Jalgaon",
+      "Dhule",
+      "Satara",
+      "Ratnagiri",
+      "Chandrapur",
+      "Wardha",
+      "Yavatmal",
+      "Gondia",
+      "Palghar",
+      "Vasai|Vasai-Virar|Virar",
+      "Kalyan|Kalyan-Dombivli",
+      "Dombivli",
+      "Badlapur",
+      "Panvel",
+      "Kharghar",
+      "Vashi",
+      "Belapur|CBD Belapur",
+      "Airoli",
+      "Ghansoli",
+      "Andheri",
+      "Bandra",
+      "Powai",
+      "Goregaon",
+      "Malad",
+      "Borivali",
+      "Kandivali",
+      "Dadar",
+      "Worli",
+      "Lower Parel",
+      "Parel",
+      "Byculla",
+      "Colaba",
+      "Nariman Point",
+      "Fort Mumbai",
+      "Churchgate",
+      "Chembur",
+      "Ghatkopar",
+      "Vikhroli",
+      "Mulund",
+      "Bhandup",
+      "Kurla",
+      "Santacruz",
+      "Vile Parle",
+      "Juhu",
+      "Versova",
+      "Hinjewadi|Hinjawadi",
+      "Magarpatta",
+      "Kharadi",
+      "Wakad",
+      "Baner",
+      "Aundh",
+      "Viman Nagar",
+      "Kalyani Nagar",
+      "Koregaon Park",
+      "Hadapsar",
+      "Kothrud",
+      "Shivajinagar",
+      "Pimple Saudagar",
+      "Wagholi",
+      "Talegaon",
+      "Chakan",
+      "Koramangala",
+      "Indiranagar",
+      "Whitefield",
+      "Marathahalli",
+      "Bellandur",
+      "Sarjapur|Sarjapur Road",
+      "HSR Layout|HSR",
+      "BTM Layout|BTM",
+      "Jayanagar",
+      "JP Nagar",
+      "Bannerghatta|Bannerghatta Road",
+      "Electronic City|Electronics City",
+      "Hebbal",
+      "Yelahanka",
+      "Yeshwanthpur",
+      "Malleshwaram|Malleswaram",
+      "Rajajinagar",
+      "MG Road",
+      "Domlur",
+      "Mahadevapura",
+      "KR Puram",
+      "Hoodi",
+      "Brookefield",
+      "Kadubeesanahalli",
+      "Bommanahalli",
+      "Hosur Road",
+      "Devanahalli",
+      "Gachibowli",
+      "Madhapur",
+      "HITEC City|Hitech City|Hi-Tech City|HITECH City",
+      "Kondapur",
+      "Kukatpally",
+      "Jubilee Hills",
+      "Banjara Hills",
+      "Begumpet",
+      "Ameerpet",
+      "Manikonda",
+      "Nanakramguda",
+      "Financial District",
+      "Raidurg",
+      "Kokapet",
+      "Miyapur",
+      "Uppal",
+      "Pocharam",
+      "Sholinganallur",
+      "Perungudi",
+      "Taramani",
+      "Guindy",
+      "Velachery",
+      "OMR|Old Mahabalipuram Road",
+      "Siruseri",
+      "Porur",
+      "Ambattur",
+      "Anna Nagar",
+      "T Nagar",
+      "Adyar",
+      "Nungambakkam",
+      "Egmore",
+      "Mylapore",
+      "Tambaram",
+      "Chromepet",
+      "Pallavaram",
+      "Poonamallee",
+      "Oragadam",
+      "Sriperumbudur",
+      "Salt Lake Sector V|Sector V|Sector 5 Salt Lake",
+      "Salt Lake City Kolkata|Bidhannagar",
+      "Rajarhat",
+      "New Town Kolkata|Newtown Kolkata",
+      "Park Street",
+      "Cyber City|DLF Cyber City|Cybercity",
+      "Golf Course Road",
+      "Sohna Road",
+      "Udyog Vihar",
+      "Sector 62 Noida",
+      "Sector 18 Noida",
+      "Sector 16 Noida",
+      "Connaught Place",
+      "Nehru Place",
+      "Okhla",
+      "Saket",
+      "Hauz Khas",
+      "Dwarka",
+      "Rohini",
+      "Janakpuri",
+      "Aerocity",
+      "Vasant Kunj",
+      "Lajpat Nagar",
+      "Karol Bagh",
+      "Greater Kailash",
+      "Mayur Vihar",
+      "Laxmi Nagar",
+      "Pitampura",
+      "Rajouri Garden",
+      "Ashram Road",
+      "SG Highway",
+      "Prahlad Nagar",
+      "Satellite",
+      "Bopal",
+      "Vastrapur",
+      "Navrangpura",
+      "Maninagar",
+      "GIFT City",
+      "Vapi",
+      "Ankleshwar",
+      "Bharuch",
+      "Navsari",
+      "Valsad",
+      "Silvassa",
+      "Daman",
+      "Diu",
+      "Port Blair",
+      "Kavaratti",
+      "Leh",
+      "Kargil"
+    ],
+    metros: [
+      "Delhi NCR|NCR Delhi|Delhi-NCR|Delhi National Capital Region",
+      "National Capital Region",
+      "NCR",
+      "Mumbai Metropolitan Region|MMR",
+      "Greater Mumbai",
+      "Greater Bengaluru|Greater Bangalore",
+      "Greater Hyderabad",
+      "Greater Chennai",
+      "Greater Kolkata",
+      "Bengaluru Urban|Bangalore Urban",
+      "Bengaluru Rural|Bangalore Rural",
+      "Pune Metropolitan Region|PMR",
+      "Chandigarh Tricity|Tricity",
+      "Kochi Metro",
+      "Konkan",
+      "Vidarbha",
+      "Marathwada",
+      "Malwa",
+      "Bundelkhand",
+      "Saurashtra",
+      "Kutch|Kachchh",
+      "Malabar",
+      "Coastal Karnataka",
+      "Rayalaseema",
+      "Coastal Andhra",
+      "Telangana Region",
+      "Chota Nagpur",
+      "Doab",
+      "Terai",
+      "Kashmir Valley",
+      "North East India|Northeast India",
+      "South India",
+      "North India",
+      "West India",
+      "East India",
+      "Central India",
+      "Pan India|Pan-India|PAN India",
+      "Anywhere in India",
+      "Across India"
+    ]
+  },
+  SG: {
+    // City-state: "Singapore" itself is an explicit country label handled by
+    // country-evidence.ts. Planning areas, districts and business parks are the
+    // only sub-national names postings use; generic words (Stadium, Expo,
+    // Promenade, Pioneer …) are deliberately left out.
+    regions: [
+      "Central Region Singapore",
+      "East Region Singapore",
+      "North Region Singapore",
+      "North-East Region Singapore|North East Region Singapore",
+      "West Region Singapore"
+    ],
+    regionCodes: [],
+    cities: [
+      "Jurong|Jurong East|Jurong West",
+      "Changi",
+      "Tampines",
+      "Woodlands",
+      "Bukit Timah",
+      "Orchard|Orchard Road",
+      "Raffles Place",
+      "Marina Bay",
+      "One-North|One North|Onenorth",
+      "Tanjong Pagar",
+      "Paya Lebar",
+      "Kallang",
+      "Toa Payoh",
+      "Ang Mo Kio",
+      "Bishan",
+      "Queenstown",
+      "Clementi",
+      "Bedok",
+      "Punggol",
+      "Sengkang",
+      "Yishun",
+      "Serangoon",
+      "Pasir Ris",
+      "Tuas",
+      "Bugis",
+      "Novena",
+      "HarbourFront|Harbourfront|Harbour Front",
+      "Sentosa",
+      "Buona Vista",
+      "Tiong Bahru",
+      "Outram",
+      "Shenton Way",
+      "Suntec|Suntec City",
+      "Changi Business Park",
+      "Seletar",
+      "Kranji",
+      "Bukit Merah",
+      "Bukit Batok",
+      "Bukit Panjang",
+      "Choa Chu Kang",
+      "Hougang",
+      "Geylang",
+      "Boon Lay",
+      "Tanglin",
+      "Rochor",
+      "Downtown Core",
+      "Marina South",
+      "River Valley",
+      "Holland Village",
+      "Dover",
+      "Kent Ridge",
+      "Mapletree Business City",
+      "Singapore Science Park|Science Park Singapore",
+      "Pasir Panjang",
+      "Telok Blangah",
+      "Jurong Island",
+      "Sembawang",
+      "Yio Chu Kang",
+      "Tai Seng",
+      "MacPherson|Macpherson",
+      "Katong",
+      "Joo Chiat",
+      "Marine Parade",
+      "Newton",
+      "Somerset",
+      "Dhoby Ghaut",
+      "Clarke Quay",
+      "Boat Quay",
+      "Robertson Quay",
+      "Kampong Glam",
+      "Farrer Park",
+      "Aljunied",
+      "Potong Pasir",
+      "Balestier",
+      "Telok Ayer",
+      "Duxton",
+      "Tanjong Rhu",
+      "Changi Airport",
+      "Changi Village",
+      "Gardens by the Bay",
+      "Marina Bay Sands|MBS",
+      "Ubi",
+      "Eunos",
+      "Simei",
+      "Bayfront",
+      "Redhill"
+    ],
+    metros: [
+      "Singapore CBD|Singapore Central Business District",
+      "Jurong Lake District",
+      "Jurong Innovation District",
+      "Punggol Digital District",
+      "Biopolis",
+      "Fusionopolis",
+      "Mediapolis",
+      "Cleantech Park",
+      "Tuas Biomedical Park",
+      "Seletar Aerospace Park",
+      "Marina Bay Financial Centre|MBFC",
+      "Asia Square",
+      "Raffles Quay",
+      "Tanjong Pagar Centre|Guoco Tower",
+      "Paya Lebar Quarter|PLQ",
+      "Alexandra Technopark",
+      "Kent Ridge Research Park",
+      "Tampines Regional Centre",
+      "Woodlands Regional Centre",
+      "Changi North"
+    ]
+  },
+  JP: {
+    regions: [
+      "Hokkaido|\u5317\u6D77\u9053",
+      "Aomori|\u9752\u68EE|\u9752\u68EE\u770C",
+      "Iwate|\u5CA9\u624B|\u5CA9\u624B\u770C",
+      "Miyagi|\u5BAE\u57CE|\u5BAE\u57CE\u770C",
+      "Akita|\u79CB\u7530|\u79CB\u7530\u770C",
+      "Yamagata|\u5C71\u5F62|\u5C71\u5F62\u770C",
+      "Fukushima|\u798F\u5CF6|\u798F\u5CF6\u770C",
+      "Ibaraki|\u8328\u57CE|\u8328\u57CE\u770C",
+      "Tochigi|\u6803\u6728|\u6803\u6728\u770C",
+      "Gunma|\u7FA4\u99AC|\u7FA4\u99AC\u770C",
+      "Saitama|\u57FC\u7389|\u57FC\u7389\u770C",
+      "Chiba|\u5343\u8449|\u5343\u8449\u770C",
+      "Tokyo|\u6771\u4EAC|\u6771\u4EAC\u90FD|Tokyo Metropolis|Tokyo-to",
+      "Kanagawa|\u795E\u5948\u5DDD|\u795E\u5948\u5DDD\u770C",
+      "Niigata|\u65B0\u6F5F|\u65B0\u6F5F\u770C",
+      "Toyama|\u5BCC\u5C71|\u5BCC\u5C71\u770C",
+      "Ishikawa|\u77F3\u5DDD|\u77F3\u5DDD\u770C",
+      "Fukui|\u798F\u4E95|\u798F\u4E95\u770C",
+      "Yamanashi|\u5C71\u68A8|\u5C71\u68A8\u770C",
+      "Nagano|\u9577\u91CE|\u9577\u91CE\u770C",
+      "Gifu|\u5C90\u961C|\u5C90\u961C\u770C",
+      "Shizuoka|\u9759\u5CA1|\u9759\u5CA1\u770C",
+      "Aichi|\u611B\u77E5|\u611B\u77E5\u770C",
+      "Mie|\u4E09\u91CD|\u4E09\u91CD\u770C",
+      "Shiga|\u6ECB\u8CC0|\u6ECB\u8CC0\u770C",
+      "Kyoto|\u4EAC\u90FD|\u4EAC\u90FD\u5E9C",
+      "Osaka|\u5927\u962A|\u5927\u962A\u5E9C|\u014Csaka",
+      "Hyogo|\u5175\u5EAB|\u5175\u5EAB\u770C|Hy\u014Dgo",
+      "Nara|\u5948\u826F|\u5948\u826F\u770C",
+      "Wakayama|\u548C\u6B4C\u5C71|\u548C\u6B4C\u5C71\u770C",
+      "Tottori|\u9CE5\u53D6|\u9CE5\u53D6\u770C",
+      "Shimane|\u5CF6\u6839|\u5CF6\u6839\u770C",
+      "Okayama|\u5CA1\u5C71|\u5CA1\u5C71\u770C",
+      "Hiroshima|\u5E83\u5CF6|\u5E83\u5CF6\u770C",
+      "Yamaguchi|\u5C71\u53E3|\u5C71\u53E3\u770C",
+      "Tokushima|\u5FB3\u5CF6|\u5FB3\u5CF6\u770C",
+      "Kagawa|\u9999\u5DDD|\u9999\u5DDD\u770C",
+      "Ehime|\u611B\u5A9B|\u611B\u5A9B\u770C",
+      "Kochi|\u9AD8\u77E5|\u9AD8\u77E5\u770C|K\u014Dchi",
+      "Fukuoka|\u798F\u5CA1|\u798F\u5CA1\u770C",
+      "Saga|\u4F50\u8CC0|\u4F50\u8CC0\u770C",
+      "Nagasaki|\u9577\u5D0E|\u9577\u5D0E\u770C",
+      "Kumamoto|\u718A\u672C|\u718A\u672C\u770C",
+      "Oita|\u5927\u5206|\u5927\u5206\u770C|\u014Cita",
+      "Miyazaki|\u5BAE\u5D0E|\u5BAE\u5D0E\u770C",
+      "Kagoshima|\u9E7F\u5150\u5CF6|\u9E7F\u5150\u5CF6\u770C",
+      "Okinawa|\u6C96\u7E04|\u6C96\u7E04\u770C"
+    ],
+    regionCodes: [],
+    cities: [
+      "Yokohama|\u6A2A\u6D5C|\u6A2A\u6D5C\u5E02",
+      "Osaka City|\u5927\u962A\u5E02",
+      "Nagoya|\u540D\u53E4\u5C4B|\u540D\u53E4\u5C4B\u5E02",
+      "Sapporo|\u672D\u5E4C|\u672D\u5E4C\u5E02",
+      "Fukuoka City|\u798F\u5CA1\u5E02",
+      "Kobe|\u795E\u6238|\u795E\u6238\u5E02|K\u014Dbe",
+      "Kawasaki|\u5DDD\u5D0E|\u5DDD\u5D0E\u5E02",
+      "Kyoto City|\u4EAC\u90FD\u5E02",
+      "Saitama City|\u3055\u3044\u305F\u307E|\u3055\u3044\u305F\u307E\u5E02",
+      "Hiroshima City|\u5E83\u5CF6\u5E02",
+      "Sendai|\u4ED9\u53F0|\u4ED9\u53F0\u5E02",
+      "Chiba City|\u5343\u8449\u5E02",
+      "Kitakyushu|\u5317\u4E5D\u5DDE|\u5317\u4E5D\u5DDE\u5E02",
+      "Sakai|\u583A|\u583A\u5E02",
+      "Niigata City|\u65B0\u6F5F\u5E02",
+      "Hamamatsu|\u6D5C\u677E|\u6D5C\u677E\u5E02",
+      "Kumamoto City|\u718A\u672C\u5E02",
+      "Sagamihara|\u76F8\u6A21\u539F|\u76F8\u6A21\u539F\u5E02",
+      "Okayama City|\u5CA1\u5C71\u5E02",
+      "Shizuoka City|\u9759\u5CA1\u5E02",
+      "Funabashi|\u8239\u6A4B|\u8239\u6A4B\u5E02",
+      "Kagoshima City|\u9E7F\u5150\u5CF6\u5E02",
+      "Kawaguchi|\u5DDD\u53E3|\u5DDD\u53E3\u5E02",
+      "Hachioji|\u516B\u738B\u5B50|\u516B\u738B\u5B50\u5E02|Hachi\u014Dji",
+      "Himeji|\u59EB\u8DEF|\u59EB\u8DEF\u5E02",
+      "Matsuyama|\u677E\u5C71|\u677E\u5C71\u5E02",
+      "Utsunomiya|\u5B87\u90FD\u5BAE|\u5B87\u90FD\u5BAE\u5E02",
+      "Matsudo|\u677E\u6238|\u677E\u6238\u5E02",
+      "Nishinomiya|\u897F\u5BAE|\u897F\u5BAE\u5E02",
+      "Oita City|\u5927\u5206\u5E02",
+      "Kurashiki|\u5009\u6577|\u5009\u6577\u5E02",
+      "Kanazawa|\u91D1\u6CA2|\u91D1\u6CA2\u5E02",
+      "Fukuyama|\u798F\u5C71|\u798F\u5C71\u5E02",
+      "Amagasaki|\u5C3C\u5D0E|\u5C3C\u5D0E\u5E02",
+      "Ichikawa|\u5E02\u5DDD|\u5E02\u5DDD\u5E02",
+      "Nagasaki City|\u9577\u5D0E\u5E02",
+      "Toyota|\u8C4A\u7530|\u8C4A\u7530\u5E02|Toyota City",
+      "Takamatsu|\u9AD8\u677E|\u9AD8\u677E\u5E02",
+      "Toyama City|\u5BCC\u5C71\u5E02",
+      "Nara City|\u5948\u826F\u5E02",
+      "Gifu City|\u5C90\u961C\u5E02",
+      "Machida|\u753A\u7530|\u753A\u7530\u5E02",
+      "Iwaki|\u3044\u308F\u304D|\u3044\u308F\u304D\u5E02",
+      "Koriyama|\u90E1\u5C71|\u90E1\u5C71\u5E02|K\u014Driyama",
+      "Fujisawa|\u85E4\u6CA2|\u85E4\u6CA2\u5E02",
+      "Kashiwa|\u67CF|\u67CF\u5E02",
+      "Takasaki|\u9AD8\u5D0E|\u9AD8\u5D0E\u5E02",
+      "Yokosuka|\u6A2A\u9808\u8CC0|\u6A2A\u9808\u8CC0\u5E02",
+      "Toyohashi|\u8C4A\u6A4B|\u8C4A\u6A4B\u5E02",
+      "Nagano City|\u9577\u91CE\u5E02",
+      "Okazaki|\u5CA1\u5D0E|\u5CA1\u5D0E\u5E02",
+      "Kawagoe|\u5DDD\u8D8A|\u5DDD\u8D8A\u5E02",
+      "Akita City|\u79CB\u7530\u5E02",
+      "Naha|\u90A3\u8987|\u90A3\u8987\u5E02",
+      "Kochi City|\u9AD8\u77E5\u5E02",
+      "Tsukuba|\u3064\u304F\u3070|\u3064\u304F\u3070\u5E02",
+      "Mito|\u6C34\u6238|\u6C34\u6238\u5E02",
+      "Morioka|\u76DB\u5CA1|\u76DB\u5CA1\u5E02",
+      "Aomori City|\u9752\u68EE\u5E02",
+      "Yamagata City|\u5C71\u5F62\u5E02",
+      "Fukushima City|\u798F\u5CF6\u5E02",
+      "Otsu|\u5927\u6D25|\u5927\u6D25\u5E02|\u014Ctsu",
+      "Wakayama City|\u548C\u6B4C\u5C71\u5E02",
+      "Tottori City|\u9CE5\u53D6\u5E02",
+      "Matsue|\u677E\u6C5F|\u677E\u6C5F\u5E02",
+      "Yamaguchi City|\u5C71\u53E3\u5E02",
+      "Tokushima City|\u5FB3\u5CF6\u5E02",
+      "Saga City|\u4F50\u8CC0\u5E02",
+      "Miyazaki City|\u5BAE\u5D0E\u5E02",
+      "Fukui City|\u798F\u4E95\u5E02",
+      "Maebashi|\u524D\u6A4B|\u524D\u6A4B\u5E02",
+      "Kofu|\u7532\u5E9C|\u7532\u5E9C\u5E02|K\u014Dfu",
+      "Tsu|\u6D25\u5E02",
+      "Chofu|\u8ABF\u5E03|\u8ABF\u5E03\u5E02|Ch\u014Dfu",
+      "Tachikawa|\u7ACB\u5DDD|\u7ACB\u5DDD\u5E02",
+      "Fuchu|\u5E9C\u4E2D|\u5E9C\u4E2D\u5E02|Fuch\u016B",
+      "Musashino|\u6B66\u8535\u91CE|\u6B66\u8535\u91CE\u5E02",
+      "Mitaka|\u4E09\u9DF9|\u4E09\u9DF9\u5E02",
+      "Atsugi|\u539A\u6728|\u539A\u6728\u5E02",
+      "Odawara|\u5C0F\u7530\u539F|\u5C0F\u7530\u539F\u5E02",
+      "Numazu|\u6CBC\u6D25|\u6CBC\u6D25\u5E02",
+      "Fuji City|\u5BCC\u58EB\u5E02",
+      "Suita|\u5439\u7530|\u5439\u7530\u5E02",
+      "Toyonaka|\u8C4A\u4E2D|\u8C4A\u4E2D\u5E02",
+      "Takatsuki|\u9AD8\u69FB|\u9AD8\u69FB\u5E02",
+      "Hirakata|\u679A\u65B9|\u679A\u65B9\u5E02",
+      "Higashiosaka|\u6771\u5927\u962A|\u6771\u5927\u962A\u5E02|Higashi-Osaka|Higashi\u014Dsaka",
+      "Ichinomiya|\u4E00\u5BAE|\u4E00\u5BAE\u5E02",
+      "Kasugai|\u6625\u65E5\u4E95|\u6625\u65E5\u4E95\u5E02",
+      "Toyokawa|\u8C4A\u5DDD|\u8C4A\u5DDD\u5E02",
+      "Kure|\u5449|\u5449\u5E02",
+      "Shimonoseki|\u4E0B\u95A2|\u4E0B\u95A2\u5E02",
+      "Kurume|\u4E45\u7559\u7C73|\u4E45\u7559\u7C73\u5E02",
+      "Nagaoka|\u9577\u5CA1|\u9577\u5CA1\u5E02",
+      "Joetsu|\u4E0A\u8D8A|\u4E0A\u8D8A\u5E02|J\u014Detsu",
+      "Hakodate|\u51FD\u9928|\u51FD\u9928\u5E02",
+      "Asahikawa|\u65ED\u5DDD|\u65ED\u5DDD\u5E02",
+      "Kushiro|\u91E7\u8DEF|\u91E7\u8DEF\u5E02",
+      "Obihiro|\u5E2F\u5E83|\u5E2F\u5E83\u5E02",
+      "Tomakomai|\u82EB\u5C0F\u7267|\u82EB\u5C0F\u7267\u5E02",
+      "Ishinomaki|\u77F3\u5DFB|\u77F3\u5DFB\u5E02",
+      "Hitachi|\u65E5\u7ACB\u5E02",
+      "Akashi|\u660E\u77F3|\u660E\u77F3\u5E02",
+      "Shibuya|\u6E0B\u8C37|\u6E0B\u8C37\u533A",
+      "Shinjuku|\u65B0\u5BBF|\u65B0\u5BBF\u533A",
+      "Minato|\u6E2F\u533A|Minato-ku|Minato City",
+      "Chiyoda|\u5343\u4EE3\u7530|\u5343\u4EE3\u7530\u533A",
+      "Chuo|\u4E2D\u592E\u533A|Ch\u016B\u014D|Chuo-ku",
+      "Shinagawa|\u54C1\u5DDD|\u54C1\u5DDD\u533A",
+      "Roppongi|\u516D\u672C\u6728",
+      "Marunouchi|\u4E38\u306E\u5185",
+      "Otemachi|\u5927\u624B\u753A|\u014Ctemachi",
+      "Meguro|\u76EE\u9ED2|\u76EE\u9ED2\u533A",
+      "Ebisu|\u6075\u6BD4\u5BFF",
+      "Akihabara|\u79CB\u8449\u539F",
+      "Ikebukuro|\u6C60\u888B",
+      "Toshima|\u8C4A\u5CF6\u533A",
+      "Bunkyo|\u6587\u4EAC\u533A|Bunky\u014D",
+      "Setagaya|\u4E16\u7530\u8C37|\u4E16\u7530\u8C37\u533A",
+      "Nakano|\u4E2D\u91CE\u533A",
+      "Suginami|\u6749\u4E26|\u6749\u4E26\u533A",
+      "Taito|\u53F0\u6771\u533A|Tait\u014D",
+      "Sumida|\u58A8\u7530\u533A",
+      "Koto|\u6C5F\u6771\u533A|K\u014Dt\u014D",
+      "Ota-ku|\u5927\u7530\u533A|\u014Cta-ku",
+      "Shiodome|\u6C50\u7559",
+      "Toranomon|\u864E\u30CE\u9580",
+      "Akasaka|\u8D64\u5742",
+      "Nihonbashi|\u65E5\u672C\u6A4B",
+      "Kanda|\u795E\u7530",
+      "Gotanda|\u4E94\u53CD\u7530",
+      "Osaki|\u5927\u5D0E",
+      "Tamachi|\u7530\u753A",
+      "Hamamatsucho|\u6D5C\u677E\u753A",
+      "Shimbashi|Shinbashi|\u65B0\u6A4B",
+      "Yurakucho|\u6709\u697D\u753A",
+      "Ginza|\u9280\u5EA7",
+      "Kyobashi|\u4EAC\u6A4B",
+      "Harajuku|\u539F\u5BBF",
+      "Omotesando|\u8868\u53C2\u9053",
+      "Aoyama|\u9752\u5C71",
+      "Daikanyama|\u4EE3\u5B98\u5C71",
+      "Nakameguro|\u4E2D\u76EE\u9ED2",
+      "Shirokane|\u767D\u91D1",
+      "Azabu|\u9EBB\u5E03",
+      "Hiroo|\u5E83\u5C3E",
+      "Kichijoji|\u5409\u7965\u5BFA",
+      "Futako-Tamagawa|Futakotamagawa|\u4E8C\u5B50\u7389\u5DDD",
+      "Odaiba|\u304A\u53F0\u5834",
+      "Toyosu|\u8C4A\u6D32",
+      "Kachidoki|\u52DD\u3069\u304D",
+      "Tsukiji|\u7BC9\u5730",
+      "Umeda|\u6885\u7530",
+      "Namba|\u96E3\u6CE2|\u306A\u3093\u3070",
+      "Shinsaibashi|\u5FC3\u658E\u6A4B",
+      "Yodoyabashi|\u6DC0\u5C4B\u6A4B",
+      "Honmachi Osaka",
+      "Tennoji|\u5929\u738B\u5BFA",
+      "Shin-Osaka|Shin Osaka|\u65B0\u5927\u962A",
+      "Sannomiya|\u4E09\u5BAE",
+      "Sakae",
+      "Meieki|\u540D\u99C5",
+      "Hakata|\u535A\u591A",
+      "Tenjin|\u5929\u795E",
+      "Minato Mirai|\u307F\u306A\u3068\u307F\u3089\u3044",
+      "Musashi-Kosugi|Musashikosugi|\u6B66\u8535\u5C0F\u6749",
+      "Shin-Yokohama|\u65B0\u6A2A\u6D5C",
+      "Kawasaki City|\u5DDD\u5D0E\u5E02",
+      "Omiya|\u5927\u5BAE",
+      "Urawa|\u6D66\u548C",
+      "Makuhari|\u5E55\u5F35",
+      "Kaihin Makuhari|\u6D77\u6D5C\u5E55\u5F35"
+    ],
+    metros: [
+      "Greater Tokyo|Greater Tokyo Area|Tokyo Metropolitan Area|Tokyo Area|\u9996\u90FD\u570F|\u6771\u4EAC\u570F",
+      "Kanto|\u95A2\u6771|Kant\u014D",
+      "Kansai|\u95A2\u897F|Kansai Region|\u95A2\u897F\u570F",
+      "Kinki|\u8FD1\u757F",
+      "Keihanshin|\u4EAC\u962A\u795E",
+      "Chubu|\u4E2D\u90E8|Ch\u016Bbu",
+      "Tokai|T\u014Dkai",
+      "Hokuriku|\u5317\u9678",
+      "Tohoku|T\u014Dhoku",
+      "Kyushu|Ky\u016Bsh\u016B",
+      "Shikoku",
+      "Chugoku Region|Ch\u016Bgoku Region|\u4E2D\u56FD\u5730\u65B9",
+      "Chukyo|\u4E2D\u4EAC|Ch\u016Bky\u014D",
+      "Greater Osaka|Osaka Area",
+      "Greater Nagoya|Nagoya Area",
+      "Greater Fukuoka",
+      "Keihin|\u4EAC\u6D5C",
+      "Shonan|\u6E58\u5357|Sh\u014Dnan",
+      "Tama Area|\u591A\u6469",
+      "Tokyo 23 Wards|\u6771\u4EAC23\u533A|23\u533A",
+      "Yokohama Area"
+    ]
+  }
+};
+var gazetteerModifiers = {
+  // Required ambiguity list (spec) — candidates outside the lists are named.
+  Cambridge: { ambiguous: true, note: "GB, US (MA), CA (ON)" },
+  Victoria: { ambiguous: true, alsoCountries: ["SC", "HK"], note: "AU state, BC capital, Seychelles, Hong Kong" },
+  Georgia: { ambiguous: true, alsoCountries: ["GE"], note: "US state or the country" },
+  Richmond: { ambiguous: true, note: "US (VA/CA), CA (BC), GB (upon Thames), AU (VIC)" },
+  Perth: { ambiguous: true, note: "AU, GB (Scotland), CA (ON)" },
+  Newcastle: { ambiguous: true, note: "AU (NSW) or GB (upon Tyne)" },
+  Hamilton: { ambiguous: true, alsoCountries: ["NZ", "BM"], note: "CA (ON), GB (Scotland), NZ, Bermuda" },
+  London: { ambiguous: true, defaultCountry: "GB", note: "GB unless a Canada-side token is present" },
+  Birmingham: { ambiguous: true, note: "GB or US (AL)" },
+  Portland: { ambiguous: true, alsoCountries: ["AU", "GB"], note: "US (OR/ME), AU (VIC), GB (Dorset)" },
+  Springfield: { ambiguous: true, alsoCountries: ["CA"], note: "many US states, AU (QLD), fictional" },
+  Kingston: { ambiguous: true, alsoCountries: ["JM"], note: "CA (ON), GB (upon Thames), AU, Jamaica" },
+  Halifax: { ambiguous: true, note: "CA (NS) or GB (West Yorkshire)" },
+  Windsor: { ambiguous: true, alsoCountries: ["GB"], note: "CA (ON), GB (Berkshire), US" },
+  Waterloo: { ambiguous: true, alsoCountries: ["BE"], note: "CA (ON), US (IA), BE" },
+  Sydney: { ambiguous: true, note: "AU (NSW) or CA (NS)" },
+  Salem: { ambiguous: true, note: "US (OR/MA) or IN (TN)" },
+  Manchester: { ambiguous: true, note: "GB or US (NH)" },
+  Vancouver: { ambiguous: true, note: "CA (BC) or US (WA)" },
+  Jersey: { ambiguous: true, alsoCountries: ["JE", "US"], note: "Channel Island or New Jersey shorthand" },
+  Washington: { ambiguous: true, alsoCountries: ["GB"], note: "US state or DC, GB (Tyne and Wear); 'Washington DC' and 'Washington State' are unambiguous" },
+  Ontario: { ambiguous: true, note: "CA province or US (CA) city; 'Ontario, CA' stays ambiguous" },
+  Paris: { ambiguous: true, alsoCountries: ["FR"], note: "FR, US (TX), CA (ON)" },
+  Melbourne: { ambiguous: true, note: "AU (VIC) or US (FL)" },
+  Hyderabad: { ambiguous: true, alsoCountries: ["PK"], note: "IN (Telangana) or PK (Sindh)" },
+  Brighton: { ambiguous: true, note: "GB, US (CO/MA), AU (VIC)" },
+  Lincoln: { ambiguous: true, note: "US (NE) or GB" },
+  Durham: { ambiguous: true, note: "US (NC), GB, CA (ON)" },
+  Boston: { ambiguous: true, note: "US (MA) or GB (Lincolnshire)" },
+  Bath: { ambiguous: true, wholeSegmentOnly: true, alsoCountries: ["US"], note: "GB, US (ME/NY); also a word" },
+  Reading: { ambiguous: true, wholeSegmentOnly: true, note: "GB (Berkshire) or US (PA); also a word" },
+  // Additional collisions with well-known places outside the seven markets.
+  Punjab: { ambiguous: true, alsoCountries: ["PK"] },
+  Kochi: { ambiguous: true, note: "IN (Kerala) or JP (K\u014Dchi)" },
+  Oxford: { ambiguous: true, note: "GB or US (MS/OH)" },
+  Bristol: { ambiguous: true, note: "GB or US (CT/TN/VA/RI)" },
+  Southampton: { ambiguous: true, note: "GB, US (NY), CA (ON)" },
+  Liverpool: { ambiguous: true, note: "GB or AU (NSW)" },
+  Ipswich: { ambiguous: true, note: "GB (Suffolk) or AU (QLD)" },
+  Dublin: { ambiguous: true, alsoCountries: ["IE"], note: "IE or US (CA/OH)" },
+  Athens: { ambiguous: true, alsoCountries: ["GR"], note: "GR or US (GA/OH)" },
+  Alexandria: { ambiguous: true, alsoCountries: ["EG"], note: "US (VA) or EG" },
+  Canton: { ambiguous: true, alsoCountries: ["CN"], note: "US (OH) or historic Guangzhou" },
+  Chantilly: { ambiguous: true, alsoCountries: ["FR"] },
+  Montpelier: { ambiguous: true, alsoCountries: ["FR"] },
+  Orleans: { ambiguous: true, alsoCountries: ["FR"], note: "CA (ON) or FR; 'New Orleans' is unambiguous" },
+  Dieppe: { ambiguous: true, alsoCountries: ["FR"] },
+  Banff: { ambiguous: true, alsoCountries: ["GB"] },
+  Nelson: { ambiguous: true, alsoCountries: ["NZ", "GB"] },
+  Hastings: { ambiguous: true, alsoCountries: ["NZ", "US"] },
+  Canterbury: { ambiguous: true, alsoCountries: ["NZ"] },
+  Queenstown: { ambiguous: true, alsoCountries: ["NZ"] },
+  Devonport: { ambiguous: true, alsoCountries: ["NZ", "GB"] },
+  Heidelberg: { ambiguous: true, alsoCountries: ["DE"] },
+  Coburg: { ambiguous: true, alsoCountries: ["DE"] },
+  Brunswick: { ambiguous: true, alsoCountries: ["DE", "US"] },
+  Rhodes: { ambiguous: true, alsoCountries: ["GR"] },
+  Malaga: { ambiguous: true, alsoCountries: ["ES"] },
+  Ballina: { ambiguous: true, alsoCountries: ["IE"] },
+  Georgetown: { ambiguous: true, alsoCountries: ["GY", "MY"], note: "many; also Guyana and Penang" },
+  Dover: { ambiguous: true, alsoCountries: ["GB"], note: "US (DE/NH), GB (Kent), SG" },
+  Whitefield: { ambiguous: true, alsoCountries: ["GB"], note: "IN (Bengaluru) or GB (Greater Manchester)" },
+  "National Capital Region": { ambiguous: true, alsoCountries: ["PH"], note: "CA (Ottawa), IN (Delhi), PH (Manila)" },
+  NCR: { ambiguous: true, alsoCountries: ["PH"], note: "Delhi NCR, Manila NCR or the company" },
+  "Capital Region": { ambiguous: true, alsoCountries: ["US"], note: "CA (Alberta) or US (Albany)" },
+  "Financial District": { ambiguous: true, alsoCountries: ["US"], note: "IN (Hyderabad) or US (NYC/SF)" },
+  "Central Coast": { ambiguous: true, alsoCountries: ["US"] },
+  "West End": { ambiguous: true, alsoCountries: ["CA"] },
+  "Notting Hill": { ambiguous: true },
+  Haymarket: { ambiguous: true, alsoCountries: ["US"] },
+  "Olympic Park": { ambiguous: true, alsoCountries: ["GB", "US"] },
+  "Park Street": { ambiguous: true, alsoCountries: ["AU", "US"] },
+  Essex: { ambiguous: true, alsoCountries: ["US", "CA"], note: "GB county or US/CA counties" },
+  Somerset: { ambiguous: true, alsoCountries: ["US"], note: "GB county, US (NJ/KY), SG" },
+  Suffolk: { ambiguous: true, alsoCountries: ["US"], note: "GB county or US (VA/NY)" },
+  Sussex: { ambiguous: true, alsoCountries: ["US"] },
+  Rutland: { ambiguous: true, alsoCountries: ["US"] },
+  Winchester: { ambiguous: true, alsoCountries: ["US"] },
+  Elgin: { ambiguous: true, alsoCountries: ["US"] },
+  Stafford: { ambiguous: true, alsoCountries: ["US"] },
+  Chesterfield: { ambiguous: true, alsoCountries: ["US"] },
+  Mansfield: { ambiguous: true, alsoCountries: ["US"] },
+  Kettering: { ambiguous: true, alsoCountries: ["US"] },
+  Brentwood: { ambiguous: true, alsoCountries: ["US"] },
+  Enfield: { ambiguous: true, alsoCountries: ["US"] },
+  Sutton: { ambiguous: true, alsoCountries: ["US", "CA"] },
+  Soho: { ambiguous: true, alsoCountries: ["US"] },
+  Chelsea: { ambiguous: true, alsoCountries: ["US"] },
+  Kensington: { ambiguous: true, alsoCountries: ["US", "AU", "CA"] },
+  Paddington: { ambiguous: true, alsoCountries: ["AU"] },
+  "Kings Cross": { ambiguous: true, alsoCountries: ["AU"] },
+  Monmouth: { ambiguous: true, alsoCountries: ["US"] },
+  Midland: { ambiguous: true, alsoCountries: ["US", "CA"] },
+  Logan: { ambiguous: true, alsoCountries: ["US"] },
+  Rockingham: { ambiguous: true, alsoCountries: ["US"] },
+  Armadale: { ambiguous: true, alsoCountries: ["GB"] },
+  Claremont: { ambiguous: true, alsoCountries: ["US"] },
+  Norwood: { ambiguous: true, alsoCountries: ["US"] },
+  Marion: { ambiguous: true, alsoCountries: ["US"] },
+  "Bedford Park": { ambiguous: true, alsoCountries: ["US"] },
+  "Victoria Park": { ambiguous: true, alsoCountries: ["GB", "CA"] },
+  "Spring Hill": { ambiguous: true, alsoCountries: ["US"] },
+  Clayton: { ambiguous: true, alsoCountries: ["US"] },
+  Newtown: { ambiguous: true, alsoCountries: ["US", "GB"] },
+  Sunbury: { ambiguous: true, alsoCountries: ["US", "GB"] },
+  Melton: { ambiguous: true, alsoCountries: ["GB"] },
+  Williamstown: { ambiguous: true, alsoCountries: ["US"] },
+  Maitland: { ambiguous: true, alsoCountries: ["US"] },
+  Grafton: { ambiguous: true, alsoCountries: ["US"] },
+  "Bella Vista": { ambiguous: true, alsoCountries: ["US"] },
+  Redlands: { ambiguous: true, alsoCountries: ["US"] },
+  Amherst: { ambiguous: true, alsoCountries: ["US"] },
+  Vernon: { ambiguous: true, alsoCountries: ["US"] },
+  Sidney: { ambiguous: true, alsoCountries: ["US"] },
+  Bridgewater: { ambiguous: true, alsoCountries: ["US"] },
+  Riverview: { ambiguous: true, alsoCountries: ["US"] },
+  Jasper: { ambiguous: true, wholeSegmentOnly: true, alsoCountries: ["US"] },
+  Mission: { ambiguous: true, wholeSegmentOnly: true, alsoCountries: ["US"] },
+  "San Juan": { ambiguous: true, alsoCountries: ["AR", "PH"] },
+  Malvern: { ambiguous: true, note: "US (PA), AU (VIC), GB (Worcestershire)" },
+  Terai: { ambiguous: true, alsoCountries: ["NP"] },
+  // Ordinary words: only a complete segment can be a place.
+  Sterling: { wholeSegmentOnly: true },
+  Mobile: { wholeSegmentOnly: true },
+  Bend: { wholeSegmentOnly: true },
+  Norman: { wholeSegmentOnly: true },
+  Frederick: { wholeSegmentOnly: true },
+  Newton: { wholeSegmentOnly: true, ambiguous: true },
+  Jackson: { wholeSegmentOnly: true },
+  Lawrence: { wholeSegmentOnly: true },
+  Wayne: { wholeSegmentOnly: true },
+  Troy: { wholeSegmentOnly: true },
+  Davis: { wholeSegmentOnly: true },
+  Campbell: { wholeSegmentOnly: true },
+  Edison: { wholeSegmentOnly: true },
+  Franklin: { wholeSegmentOnly: true },
+  Independence: { wholeSegmentOnly: true },
+  Sale: { wholeSegmentOnly: true, ambiguous: true },
+  Bury: { wholeSegmentOnly: true },
+  Derby: { wholeSegmentOnly: true, ambiguous: true, alsoCountries: ["US"] },
+  Tyrone: { wholeSegmentOnly: true },
+  Elizabeth: { wholeSegmentOnly: true },
+  Mitchell: { wholeSegmentOnly: true },
+  Bruce: { wholeSegmentOnly: true },
+  Hume: { wholeSegmentOnly: true },
+  Barton: { wholeSegmentOnly: true },
+  Prospect: { wholeSegmentOnly: true },
+  Newman: { wholeSegmentOnly: true },
+  Katherine: { wholeSegmentOnly: true },
+  Clarence: { wholeSegmentOnly: true },
+  Griffith: { wholeSegmentOnly: true },
+  Forster: { wholeSegmentOnly: true },
+  Singleton: { wholeSegmentOnly: true },
+  Sutherland: { wholeSegmentOnly: true },
+  Miranda: { wholeSegmentOnly: true },
+  Botany: { wholeSegmentOnly: true },
+  Manly: { wholeSegmentOnly: true },
+  Glebe: { wholeSegmentOnly: true },
+  Carlton: { wholeSegmentOnly: true },
+  Knox: { wholeSegmentOnly: true },
+  Sunshine: { wholeSegmentOnly: true },
+  Hunter: { wholeSegmentOnly: true },
+  "Tom Price": { wholeSegmentOnly: true },
+  Trail: { wholeSegmentOnly: true },
+  Duncan: { wholeSegmentOnly: true },
+  Terrace: { wholeSegmentOnly: true },
+  Brooks: { wholeSegmentOnly: true },
+  Thompson: { wholeSegmentOnly: true },
+  Lindsay: { wholeSegmentOnly: true },
+  Cochrane: { wholeSegmentOnly: true },
+  Anand: { wholeSegmentOnly: true },
+  Erode: { wholeSegmentOnly: true },
+  Hassan: { wholeSegmentOnly: true },
+  Puri: { wholeSegmentOnly: true },
+  Satellite: { wholeSegmentOnly: true },
+  Toyota: { wholeSegmentOnly: true },
+  Hitachi: { wholeSegmentOnly: true },
+  Saga: { wholeSegmentOnly: true },
+  Mie: { wholeSegmentOnly: true },
+  Tsu: { wholeSegmentOnly: true },
+  Kanda: { wholeSegmentOnly: true },
+  Sakae: { wholeSegmentOnly: true },
+  Chuo: { wholeSegmentOnly: true },
+  Minato: { wholeSegmentOnly: true },
+  Koto: { wholeSegmentOnly: true },
+  Kure: { wholeSegmentOnly: true },
+  Ubi: { wholeSegmentOnly: true },
+  Redhill: { wholeSegmentOnly: true },
+  Bayfront: { wholeSegmentOnly: true },
+  Simei: { wholeSegmentOnly: true },
+  Eunos: { wholeSegmentOnly: true },
+  Delta: { wholeSegmentOnly: true },
+  Ajax: { wholeSegmentOnly: true },
+  Hull: { wholeSegmentOnly: true, ambiguous: true },
+  Concord: { wholeSegmentOnly: true },
+  Columbia: { wholeSegmentOnly: true },
+  Charleston: { wholeSegmentOnly: true },
+  Hollywood: { wholeSegmentOnly: true },
+  Queens: { wholeSegmentOnly: true },
+  Bronx: { wholeSegmentOnly: true },
+  Midwest: { wholeSegmentOnly: true },
+  Prairies: { wholeSegmentOnly: true },
+  Maritimes: { wholeSegmentOnly: true },
+  Midlands: { wholeSegmentOnly: true },
+  Stoke: { wholeSegmentOnly: true },
+  Burton: { wholeSegmentOnly: true },
+  Ely: { wholeSegmentOnly: true },
+  Ayr: { wholeSegmentOnly: true },
+  Hove: { wholeSegmentOnly: true },
+  Wagga: { wholeSegmentOnly: true },
+  Eugene: { wholeSegmentOnly: true },
+  Flint: { wholeSegmentOnly: true },
+  Providence: { wholeSegmentOnly: true },
+  Richardson: { wholeSegmentOnly: true },
+  Katy: { wholeSegmentOnly: true },
+  Casper: { wholeSegmentOnly: true },
+  Savannah: { wholeSegmentOnly: true },
+  Toledo: { ambiguous: true, alsoCountries: ["ES"] },
+  Olympia: { ambiguous: true, alsoCountries: ["GR"] },
+  "Santa Cruz": { ambiguous: true, alsoCountries: ["BO", "ES"] },
+  "New Brunswick": { ambiguous: true, note: "CA province or US (NJ) city" }
+};
+var guardedRegionCodes = [
+  "DE",
+  "ME",
+  "OR",
+  "IT",
+  "HI",
+  "OK",
+  "NO",
+  "ID",
+  "IL",
+  "AS",
+  "BE",
+  "IN",
+  "ON",
+  "CO",
+  "NE",
+  "OH",
+  "MD",
+  "MB",
+  "NB",
+  "PE",
+  "YT",
+  "SA",
+  "ACT",
+  "MS",
+  "MT",
+  "MA",
+  "AL"
+];
+var anchorRequiredCodeCountries = ["IN"];
+var countryCollisionCodes = {
+  CA: { region: "US", country: "CA" },
+  IN: { region: "US", country: "IN" }
+};
+
+// src/location-gazetteer.ts
+var markets = new Set(supportedMarketCodes);
+var isMarket = (code) => markets.has(code);
+var normalizeToken = (value) => value.normalize("NFKC").toLocaleLowerCase("en-US").normalize("NFD").replace(/[̀-ͯ]/g, "").normalize("NFC").replace(/[.'’`]/g, "");
+var tokenPattern = /[^\s\-–—&,;/|()（）、]+/gu;
+function tokenize(segment) {
+  const tokens = [];
+  for (const match of segment.matchAll(tokenPattern)) {
+    const norm = normalizeToken(match[0]);
+    if (norm) tokens.push({ text: match[0], norm, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length });
+  }
+  return tokens;
+}
+var phraseKey = (value) => tokenize(value.normalize("NFKC")).map((token) => token.norm).join(" ");
+var cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+var cjkSuffix = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]{0,8}[区市町村郡]$/u;
+var negative = /\b(?:not|except|excluding|excluded|outside|sauf|hors|exclu(?:e|s|es)?)\b|以外|除外|対象外|除く|不包括|不含|बाहर/iu;
+var shortLabels = { US: "US", USA: "US", UK: "GB", GB: "GB", GBR: "GB", AU: "AU", AUS: "AU", CAN: "CA", SG: "SG", SGP: "SG", JP: "JP", JPN: "JP" };
+var unitSeparator = /[;|/\n]+/u;
+var segmentSeparator = /[,()（）、]+|\s+[-–—]+\s+/u;
+var entries = /* @__PURE__ */ new Map();
+var codes = /* @__PURE__ */ new Map();
+var maxTokens = 1;
+function entryFor(key, display) {
+  let entry = entries.get(key);
+  if (!entry) {
+    entry = { key, display, tokenCount: key.split(" ").length, kinds: /* @__PURE__ */ new Map(), nonMarket: /* @__PURE__ */ new Set(), ambiguous: false, wholeSegmentOnly: false, defaultCountry: null };
+    entries.set(key, entry);
+    maxTokens = Math.max(maxTokens, entry.tokenCount);
+  }
+  return entry;
+}
+for (const country of supportedMarketCodes) {
+  const data = gazetteerSource[country];
+  const lists = [["region", data.regions], ["city", data.cities], ["metro", data.metros]];
+  for (const [kind, items] of lists) {
+    for (const item of items) {
+      for (const form of item.split("|")) {
+        const key = phraseKey(form);
+        if (!key) continue;
+        const entry = entryFor(key, form.trim());
+        const kinds = entry.kinds.get(country) ?? /* @__PURE__ */ new Set();
+        kinds.add(kind);
+        entry.kinds.set(country, kinds);
+      }
+    }
+  }
+  const guardedByCountry = anchorRequiredCodeCountries.includes(country);
+  for (const code of data.regionCodes) {
+    const upper = code.normalize("NFKC").toUpperCase();
+    const existing = codes.get(upper) ?? { code: upper, countries: /* @__PURE__ */ new Set(), guarded: false, wordGuarded: guardedRegionCodes.includes(upper), collision: null };
+    existing.countries.add(country);
+    existing.guarded = existing.guarded || guardedByCountry || existing.wordGuarded;
+    existing.collision = countryCollisionCodes[upper] ?? null;
+    codes.set(upper, existing);
+  }
+}
+for (const [name, modifier] of Object.entries(gazetteerModifiers)) {
+  const key = phraseKey(name);
+  if (!key) continue;
+  const entry = entryFor(key, name);
+  if (modifier.ambiguous) entry.ambiguous = true;
+  if (modifier.wholeSegmentOnly) entry.wholeSegmentOnly = true;
+  if (modifier.defaultCountry) entry.defaultCountry = modifier.defaultCountry;
+  for (const code of modifier.alsoCountries ?? []) {
+    if (isMarket(code)) {
+      if (!entry.kinds.has(code)) entry.kinds.set(code, /* @__PURE__ */ new Set(["city"]));
+    } else entry.nonMarket.add(code);
+  }
+}
+for (const entry of entries.values()) {
+  if (entry.kinds.size + entry.nonMarket.size > 1) entry.ambiguous = true;
+}
+var cjkKeys = [...entries.keys()].filter((key) => cjk.test(key) && !key.includes(" ")).sort((a, b) => b.length - a.length);
+var hasKind = (entry, country, ...kinds) => kinds.some((kind) => entry.kinds.get(country)?.has(kind));
+var isCityOnly = (entry) => [...entry.kinds.values()].every((kinds) => !kinds.has("region") && !kinds.has("region_code"));
+function nameItem(entry, text2, segment) {
+  const candidates = new Set(entry.kinds.keys());
+  const regionReading = new Set([...entry.kinds.keys()].filter((country) => hasKind(entry, country, "region")));
+  return { type: "name", text: text2, segment, candidates, regionReading: regionReading.size ? regionReading : candidates, ambiguous: entry.ambiguous || candidates.size !== 1, cityish: isCityOnly(entry), entry, code: null, anchored: true, resolved: null, confidence: null, inConflict: false };
+}
+function codeItem(code, text2, segment) {
+  const candidates = new Set(code.countries);
+  if (code.collision) candidates.add(code.collision.country);
+  return { type: "code", text: text2, segment, candidates, regionReading: candidates, ambiguous: candidates.size !== 1, cityish: false, entry: null, code, anchored: !code.guarded, resolved: null, confidence: null, inConflict: false };
+}
+function explicitItem(country, text2, segment) {
+  const candidates = /* @__PURE__ */ new Set([country]);
+  return { type: "explicit", text: text2, segment, candidates, regionReading: candidates, ambiguous: false, cityish: false, entry: null, code: null, anchored: true, resolved: country, confidence: "high", inConflict: false };
+}
+function explicitCountryAt(tokens, index) {
+  for (let length = Math.min(4, tokens.length - index); length >= 1; length--) {
+    const slice = tokens.slice(index, index + length).map((token) => token.text);
+    const country = explicitCountryAlias(slice.join(" ")) ?? explicitCountryAlias(slice.join("-"));
+    if (country) return { country, length };
+  }
+  const bare = tokens[index].text.normalize("NFKC").replace(/\./g, "");
+  const others = tokens.filter((_, position) => position !== index);
+  const besideCode = tokens.length <= 2 && others.every((token) => /^[A-Z]{2,3}$/.test(token.text.normalize("NFKC")) && codes.has(token.text.normalize("NFKC")));
+  if (/^[A-Z]{2,3}$/.test(bare) && shortLabels[bare] && besideCode) return { country: shortLabels[bare], length: 1 };
+  return null;
+}
+function itemsForSegment(segment, segmentIndex) {
+  const items = [];
+  const tokens = tokenize(segment);
+  let index = 0;
+  while (index < tokens.length) {
+    const explicit = explicitCountryAt(tokens, index);
+    if (explicit) {
+      items.push(explicitItem(explicit.country, segment.slice(tokens[index].start, tokens[index + explicit.length - 1].end), segmentIndex));
+      index += explicit.length;
+      continue;
+    }
+    let matched = null;
+    for (let length = Math.min(maxTokens, tokens.length - index); length >= 1 && !matched; length--) {
+      const key = tokens.slice(index, index + length).map((token) => token.norm).join(" ");
+      const entry = entries.get(key);
+      if (entry && (!entry.wholeSegmentOnly || length === tokens.length)) matched = { entry, length, text: segment.slice(tokens[index].start, tokens[index + length - 1].end) };
+    }
+    if (!matched && cjk.test(tokens[index].norm)) {
+      const norm = tokens[index].norm;
+      for (const key of cjkKeys) {
+        if (norm.length > key.length && norm.startsWith(key) && cjkSuffix.test(norm.slice(key.length))) {
+          const entry = entries.get(key);
+          if (entry && !entry.wholeSegmentOnly) {
+            matched = { entry, length: 1, text: tokens[index].text.slice(0, key.length) };
+            break;
+          }
+        }
+      }
+    }
+    if (matched) {
+      items.push(nameItem(matched.entry, matched.text, segmentIndex));
+      index += matched.length;
+      continue;
+    }
+    const upper = tokens[index].text.normalize("NFKC");
+    const code = /^[A-Z]{2,3}$/.test(upper) ? codes.get(upper) : void 0;
+    if (code) {
+      const item = codeItem(code, tokens[index].text, segmentIndex);
+      const before = items[items.length - 1];
+      if (code.guarded && before?.type === "explicit" && before.segment === segmentIndex && code.countries.has(before.resolved)) {
+        item.anchored = true;
+        item.candidates = /* @__PURE__ */ new Set([before.resolved]);
+        item.ambiguous = false;
+      }
+      items.push(item);
+    }
+    index++;
+  }
+  return items;
+}
+function anchorCodes(group, unitItems) {
+  for (let index = 0; index < group.length; index++) {
+    const item = group[index];
+    if (item.type !== "code" || item.resolved) continue;
+    const previous = group[index - 1];
+    const cityBefore = previous && previous.type === "name" && previous.cityish && previous.segment >= item.segment - 1 ? previous : null;
+    const adjacentExplicit = unitItems.find((other) => other.type === "explicit" && Math.abs(other.segment - item.segment) <= 1);
+    let supported = [];
+    if (cityBefore) supported = [...item.candidates].filter((country) => cityBefore.candidates.has(country));
+    else if (adjacentExplicit) supported = [...item.candidates].filter((country) => adjacentExplicit.candidates.has(country));
+    if (supported.length === 1) {
+      item.anchored = true;
+      item.candidates = new Set(supported);
+      item.ambiguous = false;
+    } else if (supported.length > 1) {
+      item.candidates = new Set(supported);
+    }
+  }
+}
+function resolveGroup(group, unitItems) {
+  anchorCodes(group, unitItems);
+  const anchors = group.filter((item) => !item.ambiguous && item.anchored);
+  const anchorCountries = new Set(anchors.map((item) => [...item.candidates][0]));
+  const conflict = anchorCountries.size > 1;
+  for (const item of anchors) {
+    item.resolved = [...item.candidates][0];
+    item.confidence = "high";
+    item.inConflict = conflict;
+  }
+  if (!conflict) {
+    const open = group.filter((item) => item.ambiguous || !item.anchored);
+    if (anchorCountries.size === 1) {
+      const country = [...anchorCountries][0];
+      for (const item of open) {
+        if (item.type === "code" && !item.anchored) continue;
+        if (item.candidates.has(country)) {
+          item.resolved = country;
+          item.confidence = "high";
+        }
+      }
+    } else {
+      const mutual = open.filter((item) => item.type !== "code" || item.anchored || item.ambiguous);
+      if (mutual.length >= 2) {
+        const first = mutual[0];
+        let intersection = new Set(first.candidates);
+        for (const item of mutual.slice(1)) {
+          const reading = item.segment > first.segment && item.type === "name" ? item.regionReading : item.candidates;
+          intersection = new Set([...intersection].filter((country) => reading.has(country)));
+        }
+        if (intersection.size === 1) {
+          const country = [...intersection][0];
+          for (const item of mutual) {
+            item.resolved = country;
+            item.confidence = "high";
+          }
+        }
+      }
+    }
+  }
+  for (const item of group) {
+    if (item.type !== "name" || !item.cityish || !item.resolved) continue;
+    const qualified = group.some((other) => other !== item && other.resolved === item.resolved && (other.type !== "name" || !other.cityish));
+    item.confidence = qualified ? "high" : "medium";
+  }
+  return conflict;
+}
+function kindOf(item) {
+  if (item.type === "code") return "region_code";
+  const entry = item.entry;
+  const kinds = entry.kinds.get(item.resolved);
+  if (kinds?.has("region")) return "region";
+  if (kinds?.has("metro") && !kinds.has("city")) return "metro";
+  return "city";
+}
+function gazetteerCountryEvidence(label) {
+  const result = { countries: [], matches: [], ambiguous: [], conflict: false };
+  if (typeof label !== "string" || !label.trim()) return result;
+  const allItems = [];
+  let segmentIndex = 0;
+  for (const unit of label.normalize("NFKC").split(unitSeparator)) {
+    const unitItems = [];
+    const groups = [];
+    for (const raw of unit.split(segmentSeparator)) {
+      const segment = raw.trim();
+      segmentIndex++;
+      if (!segment || negative.test(segment)) continue;
+      const items = itemsForSegment(segment, segmentIndex);
+      if (!items.length) continue;
+      const startsGroup = items.some((item) => item.type === "name" && item.cityish) || !groups.length;
+      if (startsGroup) groups.push([]);
+      groups[groups.length - 1].push(...items);
+      unitItems.push(...items);
+    }
+    for (const group of groups) if (resolveGroup(group, unitItems)) result.conflict = true;
+    allItems.push(...unitItems);
+  }
+  for (const item of allItems) {
+    if (item.resolved || item.type !== "name" || !item.entry?.defaultCountry) continue;
+    const fallback = item.entry.defaultCountry;
+    const competing = [...item.candidates].filter((country) => country !== fallback);
+    const contested = allItems.some((other) => other !== item && competing.some((country) => other.candidates.has(country)));
+    if (!contested) {
+      item.resolved = fallback;
+      item.confidence = "medium";
+    }
+  }
+  const seenAmbiguous = /* @__PURE__ */ new Set();
+  for (const item of allItems) {
+    if (item.type === "explicit") {
+      if (item.inConflict && item.resolved && !result.countries.includes(item.resolved)) result.countries.push(item.resolved);
+      continue;
+    }
+    if (item.resolved && item.confidence) {
+      if (item.code?.collision && item.resolved === item.code.collision.country) continue;
+      result.matches.push({ token: item.text, country: item.resolved, kind: kindOf(item), confidence: item.confidence });
+      if (!result.countries.includes(item.resolved)) result.countries.push(item.resolved);
+    } else if (item.ambiguous && (item.type === "name" || !item.code?.wordGuarded || item.code.collision)) {
+      const key = normalizeToken(item.text);
+      if (!seenAmbiguous.has(key)) {
+        seenAmbiguous.add(key);
+        result.ambiguous.push(item.text);
+      }
+    }
+  }
+  return result;
+}
+function combineCountryEvidence(explicit, gazetteer) {
+  const stated = [...new Set(explicit.filter((code) => typeof code === "string" && code))];
+  if (stated.length) return stated;
+  return gazetteer.conflict ? [] : [...gazetteer.countries];
+}
+
+// src/run.ts
 var supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false } }
 );
-var UA = { "User-Agent": "corveno-corpus (hello@corveno.io)" };
-var CONCURRENCY = 40;
-var SEEN_BUMP_STALE_MS = 4 * 60 * 60 * 1e3;
-var CLOSE_STALE_MS = 13 * 60 * 60 * 1e3;
+var CONCURRENCY = 8;
+var BOARD_LIMIT = Math.max(0, Number(process.env.COLLECT_BOARD_LIMIT ?? 0) || 0);
+var ATS_FILTER = (process.env.COLLECT_ATS ?? "all").toLowerCase();
+var TIER_FILTER = (process.env.COLLECT_TIER ?? "all").toLowerCase();
+var PILOT = process.env.COLLECT_PILOT === "1";
+var BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 50) || 50));
+var STORE_SNAPSHOTS = process.env.COLLECT_STORE_SNAPSHOTS === "1";
+var BATCH_MAX_BYTES = Math.min(8 * 1024 * 1024, Math.max(65536, Number(process.env.COLLECT_BATCH_BYTES ?? 1048576) || 1048576));
 var INTERN_RE = /\bintern(ship)?s?\b|\bco[- ]?op\b|\bapprentice(ship)?\b/i;
 var NEWGRAD_RE = /\bnew ?grad(uate)?\b|\buniversity grad(uate)?\b|\brecent grad(uate)?\b|\bcampus hire\b|\bgraduate (program|scheme|engineer|analyst)\b|\bclass of 20\d\d\b|\bearly career\b/i;
 var TERM_RE = /\b(summer|fall|spring|winter)\s*'?(20)?(2[5-9])\b/gi;
 var GRAD_RE = /\b(?:class of|graduating(?: in| by)?|expected graduation[:\s]*)\s*(20\d\d)\b/i;
 var SPONSOR_NO_RE = /not (?:able to )?sponsor|unable to sponsor|without (?:the need for )?sponsorship|no sponsorship|sponsorship is not available/i;
-var SPONSOR_CIT_RE = /u\.?s\.? citizen(ship)?(?: is)? required|citizens? only|security clearance|export control|itar/i;
+var SPONSOR_CIT_RE = /u\.?s\.? citizen(ship)?(?: is)? required|citizens? only/i;
 var SPONSOR_YES_RE = /sponsorship (?:is )?available|will sponsor|able to sponsor/i;
 function classify(title, structuredType, description) {
   let kind = "other";
   let source = "regex";
-  if (structuredType && /intern/i.test(structuredType)) {
+  if (structuredType === "internship") {
     kind = "intern";
     source = "structured";
   } else if (INTERN_RE.test(title)) kind = "intern";
@@ -21636,65 +25478,6 @@ function cut(s, n) {
   if (last >= 55296 && last <= 56319) t = t.slice(0, -1);
   return t;
 }
-function stripHtml(s) {
-  if (!s) return null;
-  return cut(clean(s).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(), 2e4);
-}
-async function fetchBoard(ats, slug) {
-  try {
-    if (ats === "greenhouse") {
-      const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`, { headers: UA });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data.jobs ?? []).map((j) => ({
-        uid: String(j.id),
-        title: String(j.title ?? ""),
-        url: String(j.absolute_url ?? `https://job-boards.greenhouse.io/${slug}/jobs/${j.id}`),
-        locations: j.location ? [String(j.location.name ?? "")] : [],
-        posted_at: j.first_published ?? null,
-        updated_at: j.updated_at ?? null,
-        structuredType: null,
-        description: null
-      }));
-    }
-    if (ats === "lever") {
-      const res = await fetch(`https://api.lever.co/v0/postings/${slug}?mode=json`, { headers: UA });
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (!Array.isArray(data)) return null;
-      return data.map((j) => {
-        const cats = j.categories ?? {};
-        return {
-          uid: String(j.id),
-          title: String(j.text ?? ""),
-          url: String(j.hostedUrl ?? `https://jobs.lever.co/${slug}/${j.id}`),
-          locations: [cats.location, ...cats.allLocations ?? []].filter(Boolean).map(String),
-          posted_at: j.createdAt ? new Date(Number(j.createdAt)).toISOString() : null,
-          updated_at: null,
-          structuredType: cats.commitment ?? null,
-          description: stripHtml(j.descriptionPlain ?? j.description)
-        };
-      });
-    }
-    if (ats === "ashby") {
-      const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}`, { headers: UA });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data.jobs ?? []).filter((j) => j.isListed !== false).map((j) => ({
-        uid: String(j.id),
-        title: String(j.title ?? ""),
-        url: String(j.jobUrl ?? j.applyUrl ?? ""),
-        locations: [j.location, ...(j.secondaryLocations ?? []).map((s) => s.location)].filter(Boolean).map(String),
-        posted_at: j.publishedAt ?? null,
-        updated_at: null,
-        structuredType: j.employmentType ?? null,
-        description: stripHtml(j.descriptionPlain)
-      }));
-    }
-  } catch {
-  }
-  return null;
-}
 async function pageAll(table, select, filter) {
   const out = [];
   let cursor = null;
@@ -21715,14 +25498,29 @@ async function upsertBatches(table, rows, conflict, label) {
   for (let i = 0; i < rows.length; i += 500) {
     const { error } = await supabase.from(table).upsert(rows.slice(i, i + 500), { onConflict: conflict });
     if (error) throw new Error(`${label} @${i}: ${error.message}`);
-    if (i % 5e3 === 0) process.stdout.write(`\r${label}: ${Math.min(i + 500, rows.length)}/${rows.length}`);
+    if (i % 5e3 === 0)
+      process.stdout.write(
+        `\r${label}: ${Math.min(i + 500, rows.length)}/${rows.length}`
+      );
   }
   if (rows.length) console.log(`\r${label}: ${rows.length}/${rows.length}`);
 }
 var SEEDS = [
-  { url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json", source: "simplify-intern", kind: "intern" },
-  { url: "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json", source: "simplify-newgrad", kind: "new_grad" },
-  { url: "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json", source: "vansh-intern", kind: "intern" }
+  {
+    url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+    source: "simplify-intern",
+    kind: "intern"
+  },
+  {
+    url: "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
+    source: "simplify-newgrad",
+    kind: "new_grad"
+  },
+  {
+    url: "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
+    source: "vansh-intern",
+    kind: "intern"
+  }
 ];
 var SPONSOR_MAP = {
   "Offers Sponsorship": "offers",
@@ -21736,16 +25534,31 @@ function epochToIso(v) {
 }
 async function seed() {
   for (const s of SEEDS) {
-    const res = await fetch(s.url, { headers: UA });
-    if (!res.ok) {
-      console.warn(`${s.source}: ${res.status} \u2014 skipped`);
+    let listings;
+    try {
+      listings = await boundedJson(s.url, fetch, 25165824, 3e4, true);
+    } catch {
+      console.warn(`${s.source}: source unavailable \u2014 skipped`);
       continue;
     }
-    const listings = await res.json();
+    if (!Array.isArray(listings) || listings.some(
+      (l) => !l || typeof l.id !== "string" || !l.id || typeof l.url !== "string" || !l.url || typeof l.company_name !== "string" || !l.company_name || typeof l.title !== "string" || !l.title
+    )) {
+      console.warn(`${s.source}: incomplete or malformed source \u2014 skipped`);
+      continue;
+    }
+    const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const prior = new Map(
+      (await pageAll(
+        "corpus_listings",
+        "id,source_uid,posted_at",
+        (q) => q.eq("source", s.source)
+      )).map((row) => [row.source_uid, row.posted_at])
+    );
     const rows = [];
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
-      const active = l.active !== false && l.is_visible !== false;
+      const active = l.active !== false;
       rows.push({
         source: s.source,
         source_uid: l.id,
@@ -21757,10 +25570,13 @@ async function seed() {
         terms: l.terms ?? (l.season ? [l.season] : []),
         sponsorship: SPONSOR_MAP[l.sponsorship ?? ""] ?? "unknown",
         status: active ? "active" : "closed",
-        posted_at: epochToIso(l.date_posted),
+        posted_at: prior.get(l.id) ?? epochToIso(l.date_posted),
         updated_at_source: epochToIso(l.date_updated),
         closed_at: active ? null : epochToIso(l.date_updated),
-        classify_source: "seed"
+        classify_source: "seed",
+        source_checked_at: checkedAt,
+        last_seen_at: checkedAt,
+        is_publicly_listed: l.is_visible !== false
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
@@ -21769,177 +25585,262 @@ async function seed() {
 async function poll() {
   const boards = await pageAll(
     "ats_companies",
-    "id, name, ats, board_token, tier",
-    (q) => q.eq("verify_status", "active")
+    "id,name,ats,board_token,board_url,tier",
+    (q) => q.in("ats", ["greenhouse", "lever", "ashby"]).in("verify_status", ["active", "empty"])
   );
-  boards.sort((a, b) => (a.tier === "intern-proven" ? -1 : 0) - (b.tier === "intern-proven" ? -1 : 0));
-  console.log(`polling ${boards.length} boards\u2026`);
-  const existing = /* @__PURE__ */ new Map();
-  const rowsExisting = await pageAll(
-    "corpus_listings",
-    "id, source, source_uid, status, missed_polls, last_seen_at",
-    (q) => q.in("source", ["greenhouse", "lever", "ashby"])
+  boards.sort(
+    (a, b) => Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven")
   );
-  for (const r of rowsExisting) {
-    existing.set(`${r.source}:${r.source_uid}`, { id: r.id, status: r.status, missed: r.missed_polls, lastSeen: new Date(r.last_seen_at).getTime() });
+  let selected = boards.filter(
+    (b) => (ATS_FILTER === "all" || b.ats === ATS_FILTER) && (TIER_FILTER === "all" || b.tier === TIER_FILTER)
+  );
+  if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
+  console.log(
+    `boards: ${selected.length} selected of ${boards.length} (ats=${ATS_FILTER}, tier=${TIER_FILTER}, limit=${BOARD_LIMIT || "none"})`
+  );
+  const queue = [...selected], stats = { completed: 0, failed: 0, postings: 0 }, measure = {
+    sourceBytes: 0,
+    descriptionChars: 0,
+    withDescription: 0,
+    typed: 0,
+    typedFromStructured: 0,
+    typedFromText: 0,
+    withCountry: 0,
+    countryFromGazetteer: 0,
+    batches: 0,
+    splits: 0,
+    skippedMalformed: 0,
+    written: 0,
+    unchanged: 0,
+    bumped: 0,
+    fetchMs: 0,
+    dbMs: 0,
+    failures: {}
+  };
+  async function rpc(name, args) {
+    const { data, error } = await supabase.rpc(name, args);
+    if (error)
+      throw new CollectionError(`DATABASE_${error.code ?? "UNAVAILABLE"}`);
+    return data;
   }
-  console.log(`existing polled listings: ${existing.size}`);
-  const nowMs = Date.now();
-  const now = new Date(nowMs).toISOString();
-  const seen = /* @__PURE__ */ new Set();
-  const newRows = [];
-  const bumpIds = [];
-  const reopenIds = [];
-  const stats = { boards: 0, failed: 0, postings: 0 };
-  const failedBoards = /* @__PURE__ */ new Set();
-  const queue = [...boards];
   const worker = async () => {
     for (; ; ) {
-      const b = queue.shift();
-      if (!b) return;
-      const jobs = await fetchBoard(b.ats, b.board_token);
-      stats.boards++;
-      if (jobs === null) {
-        stats.failed++;
-        failedBoards.add(`${b.ats}:${b.board_token}`);
-        await supabase.from("ats_companies").update({ last_polled_at: now, last_poll_status: "error" }).eq("id", b.id);
-        continue;
-      }
-      stats.postings += jobs.length;
-      for (const j of jobs) {
-        if (!j.uid || !j.title || !j.url) continue;
-        const cls = classify(j.title, j.structuredType, j.description);
-        const key = `${b.ats}:${b.board_token}:${j.uid}`;
-        seen.add(key);
-        const ex = existing.get(key);
-        if (!ex) {
-          const keepFull = cls.kind !== "other";
-          newRows.push({
-            company_id: b.id,
-            source: b.ats,
-            source_uid: `${b.board_token}:${j.uid}`,
-            company_name: cut(clean(b.name), 200),
-            title: cut(clean(j.title), 300),
-            canonical_url: cut(clean(j.url), 800),
-            locations: j.locations.map((l) => cut(clean(l), 120)),
-            description: keepFull ? j.description : j.description ? cut(j.description, 1500) : null,
-            kind: cls.kind,
-            terms: cls.terms,
-            grad_year: cls.grad_year,
-            sponsorship: cls.sponsorship,
-            status: "active",
-            posted_at: j.posted_at,
-            updated_at_source: j.updated_at,
-            classify_source: cls.classify_source
-          });
-        } else if (ex.status === "closed") {
-          reopenIds.push(ex.id);
-        } else if (nowMs - ex.lastSeen > SEEN_BUMP_STALE_MS || ex.missed > 0) {
-          bumpIds.push(ex.id);
+      const board = queue.shift();
+      if (!board) return;
+      const runId = (0, import_node_crypto2.randomUUID)();
+      let started = false;
+      try {
+        await rpc("begin_corpus_collection", {
+          p_company_id: board.id,
+          p_run_id: runId
+        });
+        started = true;
+        const eu = board.ats === "lever" && Boolean(
+          board.board_url && new URL(board.board_url).hostname === "jobs.eu.lever.co"
+        );
+        const fetchStart = Date.now();
+        const snapshot = await fetchPrimaryBoard(
+          board.ats,
+          board.board_token,
+          fetch,
+          eu
+        );
+        measure.fetchMs += Date.now() - fetchStart;
+        if (snapshot.skippedMalformed) {
+          measure.skippedMalformed += snapshot.skippedMalformed;
+          console.warn("Skipped malformed source records", { boardId: board.id, source: board.ats, count: snapshot.skippedMalformed });
         }
+        const rows = snapshot.jobs.map((job) => {
+          const preliminary = classify(job.title, job.structured_job_type, job.description);
+          const employment = employmentTypeEvidence({
+            title: job.title,
+            description: job.description,
+            structured: job.structured_job_type,
+            kind: preliminary.kind
+          });
+          const structured_job_type = job.structured_job_type ?? (employment.conflict ? null : employment.type);
+          let country_codes = job.country_codes;
+          let country_evidence = job.country_evidence;
+          if (!country_codes.length && job.locations.length) {
+            const gazetteer = gazetteerCountryEvidence(job.locations.join(" ; "));
+            const combined = combineCountryEvidence(job.country_codes, gazetteer);
+            if (combined.length) {
+              country_codes = combined;
+              country_evidence = {
+                ...country_evidence,
+                gazetteer: gazetteer.matches,
+                gazetteer_ambiguous: gazetteer.ambiguous,
+                country_method: "gazetteer"
+              };
+            } else if (gazetteer.ambiguous.length || gazetteer.conflict) {
+              country_evidence = { ...country_evidence, gazetteer_ambiguous: gazetteer.ambiguous, gazetteer_conflict: gazetteer.conflict };
+            }
+          }
+          const { source_record_json, ...withoutRaw } = job;
+          return {
+            ...STORE_SNAPSHOTS ? job : withoutRaw,
+            country_codes,
+            country_evidence,
+            structured_job_type,
+            employment_evidence: employment.items,
+            ...classify(job.title, structured_job_type, job.description),
+            // Kept for pilot measurement only; not sent unless stored.
+            __sourceBytes: Buffer.byteLength(source_record_json, "utf8")
+          };
+        });
+        if (PILOT)
+          for (const row of rows) {
+            measure.sourceBytes += row.__sourceBytes;
+            measure.descriptionChars += row.description?.length ?? 0;
+            if (row.description) measure.withDescription++;
+            if (row.structured_job_type) {
+              measure.typed++;
+              if (row.employment_evidence.some((i) => i.field === "structured")) measure.typedFromStructured++;
+              else measure.typedFromText++;
+            }
+            if (row.country_codes.length) measure.withCountry++;
+            if (row.country_evidence.country_method === "gazetteer") measure.countryFromGazetteer++;
+          }
+        let batchIndex = 0;
+        const applyRows = async (slice) => {
+          const index = batchIndex++;
+          const dbStart = Date.now();
+          try {
+            const applied = await rpc("apply_corpus_collection_batch", {
+              p_run_id: runId,
+              p_checked_at: snapshot.checkedAt,
+              p_source_url: snapshot.sourceUrl,
+              p_rows: slice.map(({ __sourceBytes: _ignored, ...row }) => row),
+              p_batch_index: index
+            });
+            measure.dbMs += Date.now() - dbStart;
+            measure.batches++;
+            measure.written += applied?.written ?? 0;
+            measure.unchanged += applied?.unchanged ?? 0;
+            measure.bumped += applied?.bumped ?? 0;
+          } catch (error) {
+            measure.dbMs += Date.now() - dbStart;
+            if (error instanceof CollectionError && error.code === "DATABASE_57014" && slice.length > 1) {
+              measure.splits++;
+              const half = Math.ceil(slice.length / 2);
+              await applyRows(slice.slice(0, half));
+              await applyRows(slice.slice(half));
+              return;
+            }
+            throw error;
+          }
+        };
+        for (let offset = 0; offset < rows.length; ) {
+          let end = offset, total = 0;
+          while (end < rows.length && end - offset < BATCH_MAX_ROWS) {
+            const { __sourceBytes: _ignored, ...row } = rows[end];
+            const size = Buffer.byteLength(JSON.stringify(row), "utf8");
+            if (total + size > BATCH_MAX_BYTES && end > offset) break;
+            total += size;
+            end++;
+          }
+          await applyRows(rows.slice(offset, end));
+          offset = end;
+        }
+        const finishStart = Date.now();
+        await rpc("finish_corpus_collection", {
+          p_run_id: runId,
+          p_expected_count: rows.length,
+          p_checked_at: snapshot.checkedAt,
+          p_source_url: snapshot.sourceUrl,
+          p_error_code: null
+        });
+        measure.dbMs += Date.now() - finishStart;
+        stats.completed++;
+        stats.postings += rows.length;
+        if ((stats.completed + stats.failed) % 250 === 0)
+          console.log(
+            `boards:${stats.completed + stats.failed}/${selected.length} postings:${stats.postings} failed:${stats.failed}`
+          );
+      } catch (error) {
+        stats.failed++;
+        const code = error instanceof CollectionError ? error.code : "COLLECTION_UNAVAILABLE";
+        measure.failures[code] = (measure.failures[code] ?? 0) + 1;
+        console.warn("Board collection failed", {
+          boardId: board.id,
+          source: board.ats,
+          code
+        });
+        if (started)
+          try {
+            await rpc("finish_corpus_collection", {
+              p_run_id: runId,
+              p_expected_count: null,
+              p_checked_at: null,
+              p_source_url: null,
+              p_error_code: code
+            });
+          } catch {
+            console.warn("Board failure could not be recorded", {
+              boardId: board.id
+            });
+          }
       }
-      await supabase.from("ats_companies").update({ last_polled_at: now, last_poll_status: "ok" }).eq("id", b.id);
-      if (stats.boards % 250 === 0) process.stdout.write(`\rboards:${stats.boards}/${boards.length} postings:${stats.postings} new:${newRows.length}`);
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-  console.log(`
-fetched \u2014 postings:${stats.postings} boardErrors:${stats.failed} new:${newRows.length}`);
-  const events = [];
-  for (let i = 0; i < newRows.length; i += 500) {
-    const chunk = newRows.slice(i, i + 500);
-    const { data, error } = await supabase.from("corpus_listings").upsert(chunk, { onConflict: "source,source_uid" }).select("id");
-    if (error) throw new Error(`insert @${i}: ${error.message}`);
-    for (const r of data ?? []) events.push({ listing_id: r.id, event: "new", meta: {} });
-    if (i % 5e3 === 0) process.stdout.write(`\rinsert: ${Math.min(i + 500, newRows.length)}/${newRows.length}`);
+  console.log("Collection complete", stats);
+  if (PILOT)
+    console.log(
+      "PILOT_SUMMARY " + JSON.stringify({
+        ...stats,
+        ...measure,
+        avgSourceBytes: stats.postings ? Math.round(measure.sourceBytes / stats.postings) : 0,
+        avgDescriptionChars: stats.postings ? Math.round(measure.descriptionChars / stats.postings) : 0
+      })
+    );
+  const tolerated = Math.max(3, Math.floor(selected.length * 0.05));
+  if (stats.failed > tolerated) {
+    console.error(`Run failed: ${stats.failed} boards failed (tolerated ${tolerated})`);
+    process.exitCode = 1;
+  } else if (stats.failed) {
+    console.warn(`${stats.failed} board(s) failed and will be retried next cycle`);
   }
-  if (newRows.length) console.log();
-  for (let i = 0; i < bumpIds.length; i += 500) {
-    await supabase.from("corpus_listings").update({ last_seen_at: now, missed_polls: 0 }).in("id", bumpIds.slice(i, i + 500));
-  }
-  for (let i = 0; i < reopenIds.length; i += 500) {
-    const chunk = reopenIds.slice(i, i + 500);
-    await supabase.from("corpus_listings").update({ status: "reopened", last_seen_at: now, missed_polls: 0, closed_at: null }).in("id", chunk);
-    for (const id of chunk) events.push({ listing_id: id, event: "reopened", meta: {} });
-  }
-  const firstMiss = [];
-  const closing = [];
-  for (const [key, ex] of existing) {
-    if (seen.has(key) || ex.status === "closed") continue;
-    const board = key.split(":").slice(0, 2).join(":");
-    if (failedBoards.has(board)) continue;
-    if (nowMs - ex.lastSeen < CLOSE_STALE_MS) continue;
-    if (ex.missed + 1 >= 2) closing.push(ex.id);
-    else firstMiss.push(ex.id);
-  }
-  for (let i = 0; i < firstMiss.length; i += 500) {
-    await supabase.from("corpus_listings").update({ missed_polls: 1 }).in("id", firstMiss.slice(i, i + 500));
-  }
-  for (let i = 0; i < closing.length; i += 500) {
-    const chunk = closing.slice(i, i + 500);
-    await supabase.from("corpus_listings").update({ status: "closed", closed_at: now, missed_polls: 2 }).in("id", chunk);
-    for (const id of chunk) events.push({ listing_id: id, event: "closed", meta: {} });
-  }
-  for (let i = 0; i < events.length; i += 500) {
-    await supabase.from("corpus_events").insert(events.slice(i, i + 500));
-  }
-  console.log(`DONE \u2014 new:${newRows.length} bumped:${bumpIds.length} reopened:${reopenIds.length} firstMiss:${firstMiss.length} closed:${closing.length}`);
 }
 async function verify() {
-  const companies = await pageAll(
-    "ats_companies",
-    "id, ats, board_token, tier"
-  );
+  const companies = await pageAll("ats_companies", "id, ats, board_token, board_url, tier");
   console.log(`verifying ${companies.length} boards\u2026`);
-  const counts = { active: 0, empty: 0, dead: 0 };
+  const counts = { active: 0, empty: 0, unknown: 0 };
   let done = 0;
   const queue = [...companies];
   const worker = async () => {
     for (; ; ) {
       const c = queue.shift();
       if (!c) return;
-      const status = await probe(c.ats, c.board_token);
+      const status = await probe(c.ats, c.board_token, c.board_url);
       counts[status]++;
-      await supabase.from("ats_companies").update({ verify_status: status, last_verified_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", c.id);
-      if (++done % 500 === 0) process.stdout.write(`\r${done}/${companies.length}`);
-    }
-  };
-  await Promise.all(Array.from({ length: 30 }, worker));
-  console.log(`
-DONE \u2014 active:${counts.active} empty:${counts.empty} dead:${counts.dead}`);
-}
-async function probe(ats, slug) {
-  const urls = {
-    greenhouse: `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
-    lever: `https://api.lever.co/v0/postings/${slug}?mode=json&limit=1`,
-    ashby: `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}`
-  };
-  const url = urls[ats];
-  if (!url) return "dead";
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 12e3);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: UA });
-    if (!res.ok) return "dead";
-    const reader = res.body?.getReader();
-    let head2 = "";
-    if (reader) {
-      while (head2.length < 400) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        head2 += new TextDecoder().decode(value);
+      if (status !== "unknown") {
+        const { error } = await supabase.from("ats_companies").update({
+          verify_status: status,
+          last_verified_at: (/* @__PURE__ */ new Date()).toISOString()
+        }).eq("id", c.id);
+        if (error) throw new CollectionError("VERIFY_WRITE_FAILED");
       }
-      ctrl.abort();
+      if (++done % 500 === 0)
+        process.stdout.write(`\r${done}/${companies.length}`);
     }
-    const c = head2.replace(/\s+/g, "");
-    if (ats === "lever") return c.startsWith("[{") ? "active" : c.startsWith("[]") ? "empty" : "dead";
-    if (c.includes('"jobs":[{')) return "active";
-    if (c.includes('"jobs":[]')) return "empty";
-    return c.startsWith('{"jobs":[') ? "active" : "dead";
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  console.log(
+    `
+DONE \u2014 active:${counts.active} empty:${counts.empty} unknown:${counts.unknown}`
+  );
+}
+async function probe(ats, slug, registryUrl) {
+  if (!["greenhouse", "lever", "ashby"].includes(ats)) return "unknown";
+  try {
+    const eu = ats === "lever" && Boolean(
+      registryUrl && new URL(registryUrl).hostname === "jobs.eu.lever.co"
+    );
+    const result = await fetchPrimaryBoard(ats, slug, fetch, eu);
+    return result.jobs.length ? "active" : "empty";
   } catch {
-    return "dead";
-  } finally {
-    clearTimeout(t);
+    return "unknown";
   }
 }
 var mode = process.argv[2];

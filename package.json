@@ -7,10 +7,14 @@
     "build": "esbuild src/run.ts --bundle --platform=node --format=cjs --outfile=dist/run.cjs",
     "poll": "node dist/run.cjs poll",
     "seed": "node dist/run.cjs seed",
-    "verify": "node dist/run.cjs verify"
+    "verify": "node dist/run.cjs verify",
+    "typecheck": "tsc -p tsconfig.json",
+    "sync": "./sync-from-app.sh"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0"
+    "@types/node": "^22.20.2",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.91.1"

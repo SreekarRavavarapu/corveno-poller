@@ -25551,18 +25551,20 @@ async function seed() {
     const prior = new Map(
       (await pageAll(
         "corpus_listings",
-        "id,source_uid,posted_at",
+        "id,source_uid,posted_at,source_content_sha256,last_seen_at",
         (q) => q.eq("source", s.source),
         "source_uid"
-      )).map((row) => [row.source_uid, row.posted_at])
+      )).map((row) => [row.source_uid, row])
     );
     const rows = [];
+    const restamp = [];
+    const restampBefore = Date.now() - 6 * 3600 * 1e3;
+    let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
       const active = l.active !== false;
-      rows.push({
-        source: s.source,
-        source_uid: l.id,
+      const previous = prior.get(l.id);
+      const content = {
         company_name: cut(clean(l.company_name), 200),
         title: cut(clean(l.title), 300),
         canonical_url: cut(clean(l.url), 800),
@@ -25571,16 +25573,36 @@ async function seed() {
         terms: l.terms ?? (l.season ? [l.season] : []),
         sponsorship: SPONSOR_MAP[l.sponsorship ?? ""] ?? "unknown",
         status: active ? "active" : "closed",
-        posted_at: prior.get(l.id) ?? epochToIso(l.date_posted),
+        posted_at: previous?.posted_at ?? epochToIso(l.date_posted),
         updated_at_source: epochToIso(l.date_updated),
         closed_at: active ? null : epochToIso(l.date_updated),
-        classify_source: "seed",
-        source_checked_at: checkedAt,
-        last_seen_at: checkedAt,
         is_publicly_listed: l.is_visible !== false
+      };
+      const sha = (0, import_node_crypto2.createHash)("sha256").update(JSON.stringify(content)).digest("hex");
+      if (previous && previous.source_content_sha256 === sha) {
+        unchanged++;
+        const seen = previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0;
+        if (!(seen > restampBefore)) restamp.push(previous.id);
+        continue;
+      }
+      rows.push({
+        source: s.source,
+        source_uid: l.id,
+        ...content,
+        classify_source: "seed",
+        source_content_sha256: sha,
+        source_checked_at: checkedAt,
+        last_seen_at: checkedAt
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
+    for (let i = 0; i < restamp.length; i += 200) {
+      const { error } = await supabase.from("corpus_listings").update({ last_seen_at: checkedAt, source_checked_at: checkedAt }).in("id", restamp.slice(i, i + 200));
+      if (error) throw new Error(`${s.source} re-stamp @${i}: ${error.message}`);
+    }
+    console.log(
+      `${s.source}: ${rows.length} written, ${unchanged} unchanged, ${restamp.length} re-stamped`
+    );
   }
 }
 async function poll() {

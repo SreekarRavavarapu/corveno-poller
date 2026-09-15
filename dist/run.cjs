@@ -25494,13 +25494,24 @@ async function pageAll(table, select, filter, orderBy = "id") {
   }
   return out;
 }
+var UPSERT_BATCH = 100;
+async function upsertSplit(table, rows, conflict, label, offset) {
+  const { error } = await supabase.from(table).upsert(rows, { onConflict: conflict });
+  if (!error) return;
+  if (error.code === "57014" && rows.length > 10) {
+    const half = Math.ceil(rows.length / 2);
+    await upsertSplit(table, rows.slice(0, half), conflict, label, offset);
+    await upsertSplit(table, rows.slice(half), conflict, label, offset + half);
+    return;
+  }
+  throw new Error(`${label} @${offset}: ${error.message}`);
+}
 async function upsertBatches(table, rows, conflict, label) {
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from(table).upsert(rows.slice(i, i + 500), { onConflict: conflict });
-    if (error) throw new Error(`${label} @${i}: ${error.message}`);
+  for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
+    await upsertSplit(table, rows.slice(i, i + UPSERT_BATCH), conflict, label, i);
     if (i % 5e3 === 0)
       process.stdout.write(
-        `\r${label}: ${Math.min(i + 500, rows.length)}/${rows.length}`
+        `\r${label}: ${Math.min(i + UPSERT_BATCH, rows.length)}/${rows.length}`
       );
   }
   if (rows.length) console.log(`\r${label}: ${rows.length}/${rows.length}`);

@@ -161,20 +161,40 @@ async function pageAll<T extends Record<string, unknown>>(
   return out;
 }
 
+// Wide corpus rows (full descriptions, a dozen indexes, discovery trigger)
+// are expensive to rewrite: keep batches small and split a batch that hits
+// the statement timeout (57014) instead of failing the whole source.
+const UPSERT_BATCH = 100;
+async function upsertSplit(
+  table: string,
+  rows: Record<string, unknown>[],
+  conflict: string,
+  label: string,
+  offset: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from(table)
+    .upsert(rows, { onConflict: conflict });
+  if (!error) return;
+  if (error.code === "57014" && rows.length > 10) {
+    const half = Math.ceil(rows.length / 2);
+    await upsertSplit(table, rows.slice(0, half), conflict, label, offset);
+    await upsertSplit(table, rows.slice(half), conflict, label, offset + half);
+    return;
+  }
+  throw new Error(`${label} @${offset}: ${error.message}`);
+}
 async function upsertBatches(
   table: string,
   rows: Record<string, unknown>[],
   conflict: string,
   label: string,
 ) {
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase
-      .from(table)
-      .upsert(rows.slice(i, i + 500), { onConflict: conflict });
-    if (error) throw new Error(`${label} @${i}: ${error.message}`);
+  for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
+    await upsertSplit(table, rows.slice(i, i + UPSERT_BATCH), conflict, label, i);
     if (i % 5000 === 0)
       process.stdout.write(
-        `\r${label}: ${Math.min(i + 500, rows.length)}/${rows.length}`,
+        `\r${label}: ${Math.min(i + UPSERT_BATCH, rows.length)}/${rows.length}`,
       );
   }
   if (rows.length) console.log(`\r${label}: ${rows.length}/${rows.length}`);

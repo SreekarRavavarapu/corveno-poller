@@ -271,9 +271,10 @@ async function seed() {
           posted_at: string | null;
           source_content_sha256: string | null;
           last_seen_at: string | null;
+          corpus_listing_presence: { last_seen_at: string } | null;
         }>(
           "corpus_listings",
-          "id,source_uid,posted_at,source_content_sha256,last_seen_at",
+          "id,source_uid,posted_at,source_content_sha256,last_seen_at,corpus_listing_presence(last_seen_at)",
           (q) => q.eq("source", s.source),
           "source_uid",
         )
@@ -281,10 +282,10 @@ async function seed() {
     );
     const rows: Record<string, unknown>[] = [];
     const restamp: string[] = [];
-    // Presence re-stamp of unchanged seed rows once a day: every re-stamp
-    // rewrites a wide corpus row plus its indexes, and 35k community-list rows
-    // at six-hour cadence saturated the small instance on September 15, 2026.
-    const restampBase = Date.now() - 24 * 3600 * 1000;
+    // Presence re-stamps of unchanged seed rows go to the narrow
+    // corpus_listing_presence table (20260915130000), at most every six hours,
+    // never rewriting the wide corpus row.
+    const restampBase = Date.now() - 6 * 3600 * 1000;
     let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
@@ -309,11 +310,13 @@ async function seed() {
         .digest("hex");
       if (previous && previous.source_content_sha256 === sha) {
         unchanged++;
-        const seen = previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0;
-        // Per-row random spread of up to twelve hours so rows that aged
-        // together are not all rewritten in one poll.
-        const restampBefore = restampBase - Math.random() * 12 * 3600 * 1000;
-        if (!(seen > restampBefore)) restamp.push(previous.id);
+        const seen = Math.max(
+          previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0,
+          previous.corpus_listing_presence?.last_seen_at
+            ? Date.parse(previous.corpus_listing_presence.last_seen_at)
+            : 0,
+        );
+        if (!(seen > restampBase)) restamp.push(previous.id);
         continue;
       }
       rows.push({
@@ -327,11 +330,15 @@ async function seed() {
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
-    for (let i = 0; i < restamp.length; i += 100) {
-      const { error } = await supabase
-        .from("corpus_listings")
-        .update({ last_seen_at: checkedAt, source_checked_at: checkedAt })
-        .in("id", restamp.slice(i, i + 100));
+    for (let i = 0; i < restamp.length; i += 500) {
+      const { error } = await supabase.from("corpus_listing_presence").upsert(
+        restamp.slice(i, i + 500).map((id) => ({
+          listing_id: id,
+          last_seen_at: checkedAt,
+          source_checked_at: checkedAt,
+        })),
+        { onConflict: "listing_id" },
+      );
       if (error) throw new Error(`${s.source} re-stamp @${i}: ${error.message}`);
     }
     console.log(

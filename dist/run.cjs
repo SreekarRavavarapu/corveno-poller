@@ -25562,14 +25562,14 @@ async function seed() {
     const prior = new Map(
       (await pageAll(
         "corpus_listings",
-        "id,source_uid,posted_at,source_content_sha256,last_seen_at",
+        "id,source_uid,posted_at,source_content_sha256,last_seen_at,corpus_listing_presence(last_seen_at)",
         (q) => q.eq("source", s.source),
         "source_uid"
       )).map((row) => [row.source_uid, row])
     );
     const rows = [];
     const restamp = [];
-    const restampBase = Date.now() - 24 * 3600 * 1e3;
+    const restampBase = Date.now() - 6 * 3600 * 1e3;
     let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
@@ -25592,9 +25592,11 @@ async function seed() {
       const sha = (0, import_node_crypto2.createHash)("sha256").update(JSON.stringify(content)).digest("hex");
       if (previous && previous.source_content_sha256 === sha) {
         unchanged++;
-        const seen = previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0;
-        const restampBefore = restampBase - Math.random() * 12 * 3600 * 1e3;
-        if (!(seen > restampBefore)) restamp.push(previous.id);
+        const seen = Math.max(
+          previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0,
+          previous.corpus_listing_presence?.last_seen_at ? Date.parse(previous.corpus_listing_presence.last_seen_at) : 0
+        );
+        if (!(seen > restampBase)) restamp.push(previous.id);
         continue;
       }
       rows.push({
@@ -25608,8 +25610,15 @@ async function seed() {
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
-    for (let i = 0; i < restamp.length; i += 100) {
-      const { error } = await supabase.from("corpus_listings").update({ last_seen_at: checkedAt, source_checked_at: checkedAt }).in("id", restamp.slice(i, i + 100));
+    for (let i = 0; i < restamp.length; i += 500) {
+      const { error } = await supabase.from("corpus_listing_presence").upsert(
+        restamp.slice(i, i + 500).map((id) => ({
+          listing_id: id,
+          last_seen_at: checkedAt,
+          source_checked_at: checkedAt
+        })),
+        { onConflict: "listing_id" }
+      );
       if (error) throw new Error(`${s.source} re-stamp @${i}: ${error.message}`);
     }
     console.log(

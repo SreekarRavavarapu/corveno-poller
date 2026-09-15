@@ -22195,6 +22195,8 @@ var BOARD_LIMIT = Math.max(0, Number(process.env.COLLECT_BOARD_LIMIT ?? 0) || 0)
 var ATS_FILTER = (process.env.COLLECT_ATS ?? "all").toLowerCase();
 var TIER_FILTER = (process.env.COLLECT_TIER ?? "all").toLowerCase();
 var PILOT = process.env.COLLECT_PILOT === "1";
+var BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 25) || 25));
+var BATCH_MAX_BYTES = Math.min(8 * 1024 * 1024, Math.max(65536, Number(process.env.COLLECT_BATCH_BYTES ?? 1048576) || 1048576));
 var INTERN_RE = /\bintern(ship)?s?\b|\bco[- ]?op\b|\bapprentice(ship)?\b/i;
 var NEWGRAD_RE = /\bnew ?grad(uate)?\b|\buniversity grad(uate)?\b|\brecent grad(uate)?\b|\bcampus hire\b|\bgraduate (program|scheme|engineer|analyst)\b|\bclass of 20\d\d\b|\bearly career\b/i;
 var TERM_RE = /\b(summer|fall|spring|winter)\s*'?(20)?(2[5-9])\b/gi;
@@ -22380,6 +22382,7 @@ async function poll() {
     typedFromText: 0,
     withCountry: 0,
     batches: 0,
+    splits: 0,
     written: 0,
     unchanged: 0,
     bumped: 0,
@@ -22443,27 +22446,43 @@ async function poll() {
             if (row.country_codes.length) measure.withCountry++;
           }
         let batchIndex = 0;
+        const applyRows = async (slice) => {
+          const index = batchIndex++;
+          const dbStart = Date.now();
+          try {
+            const applied = await rpc("apply_corpus_collection_batch", {
+              p_run_id: runId,
+              p_checked_at: snapshot.checkedAt,
+              p_source_url: snapshot.sourceUrl,
+              p_rows: slice,
+              p_batch_index: index
+            });
+            measure.dbMs += Date.now() - dbStart;
+            measure.batches++;
+            measure.written += applied?.written ?? 0;
+            measure.unchanged += applied?.unchanged ?? 0;
+            measure.bumped += applied?.bumped ?? 0;
+          } catch (error) {
+            measure.dbMs += Date.now() - dbStart;
+            if (error instanceof CollectionError && error.code === "DATABASE_57014" && slice.length > 1) {
+              measure.splits++;
+              const half = Math.ceil(slice.length / 2);
+              await applyRows(slice.slice(0, half));
+              await applyRows(slice.slice(half));
+              return;
+            }
+            throw error;
+          }
+        };
         for (let offset = 0; offset < rows.length; ) {
           let end = offset, total = 0;
-          while (end < rows.length && end - offset < 100) {
+          while (end < rows.length && end - offset < BATCH_MAX_ROWS) {
             const size = Buffer.byteLength(JSON.stringify(rows[end]), "utf8");
-            if (total + size > 8 * 1024 * 1024 && end > offset) break;
+            if (total + size > BATCH_MAX_BYTES && end > offset) break;
             total += size;
             end++;
           }
-          const dbStart = Date.now();
-          const applied = await rpc("apply_corpus_collection_batch", {
-            p_run_id: runId,
-            p_checked_at: snapshot.checkedAt,
-            p_source_url: snapshot.sourceUrl,
-            p_rows: rows.slice(offset, end),
-            p_batch_index: batchIndex++
-          });
-          measure.dbMs += Date.now() - dbStart;
-          measure.batches++;
-          measure.written += applied?.written ?? 0;
-          measure.unchanged += applied?.unchanged ?? 0;
-          measure.bumped += applied?.bumped ?? 0;
+          await applyRows(rows.slice(offset, end));
           offset = end;
         }
         const finishStart = Date.now();

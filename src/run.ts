@@ -284,7 +284,7 @@ async function seed() {
     // Presence re-stamp of unchanged seed rows once a day: every re-stamp
     // rewrites a wide corpus row plus its indexes, and 35k community-list rows
     // at six-hour cadence saturated the small instance on September 15, 2026.
-    const restampBefore = Date.now() - 24 * 3600 * 1000;
+    const restampBase = Date.now() - 24 * 3600 * 1000;
     let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
@@ -310,6 +310,9 @@ async function seed() {
       if (previous && previous.source_content_sha256 === sha) {
         unchanged++;
         const seen = previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0;
+        // Per-row random spread of up to twelve hours so rows that aged
+        // together are not all rewritten in one poll.
+        const restampBefore = restampBase - Math.random() * 12 * 3600 * 1000;
         if (!(seen > restampBefore)) restamp.push(previous.id);
         continue;
       }

@@ -25569,7 +25569,7 @@ async function seed() {
     );
     const rows = [];
     const restamp = [];
-    const restampBefore = Date.now() - 24 * 3600 * 1e3;
+    const restampBase = Date.now() - 24 * 3600 * 1e3;
     let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
@@ -25593,6 +25593,7 @@ async function seed() {
       if (previous && previous.source_content_sha256 === sha) {
         unchanged++;
         const seen = previous.last_seen_at ? Date.parse(previous.last_seen_at) : 0;
+        const restampBefore = restampBase - Math.random() * 12 * 3600 * 1e3;
         if (!(seen > restampBefore)) restamp.push(previous.id);
         continue;
       }

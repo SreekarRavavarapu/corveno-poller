@@ -39,7 +39,12 @@ const TIER_FILTER = (process.env.COLLECT_TIER ?? "all").toLowerCase();
 const PILOT = process.env.COLLECT_PILOT === "1";
 /* Write batch bounds. Measured Sep 15 pilot: ~40KB source JSON per posting and
  * ~7s per 100-row batch on the current compute, so default to ~25 rows / 1MiB. */
-const BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 25) || 25));
+const BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 50) || 50));
+/* Owner decision (Sep 15, 2026): complete description text, structured facts,
+ * evidence and the content hash are stored for every listing; the raw provider
+ * record is only stored when explicitly requested (pilot measurements). The
+ * runtime captures raw records on demand for listings a search touches. */
+const STORE_SNAPSHOTS = process.env.COLLECT_STORE_SNAPSHOTS === "1";
 const BATCH_MAX_BYTES = Math.min(8 * 1024 * 1024, Math.max(65536, Number(process.env.COLLECT_BATCH_BYTES ?? 1048576) || 1048576));
 /* ---------------- classification ---------------- */
 
@@ -353,24 +358,29 @@ async function poll() {
           // Source-stated employment type: the provider's structured field, or
           // an explicit statement in the title/description with its quote.
           // Unknown stays null; a contradiction is recorded, not resolved.
+          const preliminary = classify(job.title, job.structured_job_type, job.description);
           const employment = employmentTypeEvidence({
             title: job.title,
             description: job.description,
             structured: job.structured_job_type,
+            kind: preliminary.kind,
           });
           const structured_job_type =
             job.structured_job_type ??
             (employment.conflict ? null : employment.type);
+          const { source_record_json, ...withoutRaw } = job;
           return {
-            ...job,
+            ...(STORE_SNAPSHOTS ? job : withoutRaw),
             structured_job_type,
             employment_evidence: employment.items,
             ...classify(job.title, structured_job_type, job.description),
+            // Kept for pilot measurement only; not sent unless stored.
+            __sourceBytes: Buffer.byteLength(source_record_json, "utf8"),
           };
         });
         if (PILOT)
           for (const row of rows) {
-            measure.sourceBytes += Buffer.byteLength(row.source_record_json, "utf8");
+            measure.sourceBytes += row.__sourceBytes;
             measure.descriptionChars += row.description?.length ?? 0;
             if (row.description) measure.withDescription++;
             if (row.structured_job_type) {
@@ -399,7 +409,7 @@ async function poll() {
               p_run_id: runId,
               p_checked_at: snapshot.checkedAt,
               p_source_url: snapshot.sourceUrl,
-              p_rows: slice,
+              p_rows: slice.map(({ __sourceBytes: _ignored, ...row }) => row),
               p_batch_index: index,
             })) as { written?: number; unchanged?: number; bumped?: number } | null;
             measure.dbMs += Date.now() - dbStart;
@@ -427,7 +437,8 @@ async function poll() {
           let end = offset,
             total = 0;
           while (end < rows.length && end - offset < BATCH_MAX_ROWS) {
-            const size = Buffer.byteLength(JSON.stringify(rows[end]), "utf8");
+            const { __sourceBytes: _ignored, ...row } = rows[end];
+            const size = Buffer.byteLength(JSON.stringify(row), "utf8");
             if (total + size > BATCH_MAX_BYTES && end > offset) break;
             total += size;
             end++;

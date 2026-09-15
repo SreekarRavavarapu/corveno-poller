@@ -22172,12 +22172,25 @@ function resolveEmploymentType(items) {
   const winner = types.sort((a, b) => rank[b] - rank[a])[0];
   return { type: winner, confidence: high.length ? "high" : "medium", conflict: false };
 }
+var COMMITMENT_MARKERS = /\b(?:part[- ]?time|full[- ]?time|contract(?:or|ual)?|fixed[- ]term|temporary|temp\b|seasonal|casual|freelance|hourly|per diem|prn|locum|zero[- ]hours?|intern(?:ship)?s?|co[- ]?op|apprentice(?:ship)?s?|working student|fellowship|volunteer|stage|stagiaire|alternance|cdd|cdi|temps (?:plein|partiel)|int[ée]rim|vacation)\b|正社員|契約社員|派遣|アルバイト|パート|インターン|業務委託|嘱託|臨時|フリーランス/i;
+function impliedFullTime(input) {
+  if (input.kind === "intern") return null;
+  const text2 = `${input.title}
+${input.description}`.normalize("NFKC");
+  if (input.description.trim().length < 200) return null;
+  if (COMMITMENT_MARKERS.test(text2)) return null;
+  return { type: "full_time", quote: "Commitment not stated: the posting mentions no part-time, contract, temporary, seasonal, internship or apprenticeship terms.", field: "implied", confidence: "medium" };
+}
 function employmentTypeEvidence(input) {
   const items = [];
   if (input.structured && EMPLOYMENT_TYPES.includes(input.structured))
     items.push({ type: input.structured, quote: input.structured, field: "structured", confidence: "high" });
   items.push(...titleItems(input.title ?? ""));
   if (input.description) items.push(...descriptionItems(input.description));
+  if (!items.length && input.description) {
+    const implied = impliedFullTime({ title: input.title ?? "", description: input.description, kind: input.kind ?? null });
+    if (implied) items.push(implied);
+  }
   const resolved = resolveEmploymentType(items);
   if (input.structured && resolved.type && !INTERNSHIP_FAMILY.includes(resolved.type) && EMPLOYMENT_TYPES.includes(input.structured))
     return { type: input.structured, confidence: "high", conflict: false, items };
@@ -22195,7 +22208,8 @@ var BOARD_LIMIT = Math.max(0, Number(process.env.COLLECT_BOARD_LIMIT ?? 0) || 0)
 var ATS_FILTER = (process.env.COLLECT_ATS ?? "all").toLowerCase();
 var TIER_FILTER = (process.env.COLLECT_TIER ?? "all").toLowerCase();
 var PILOT = process.env.COLLECT_PILOT === "1";
-var BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 25) || 25));
+var BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 50) || 50));
+var STORE_SNAPSHOTS = process.env.COLLECT_STORE_SNAPSHOTS === "1";
 var BATCH_MAX_BYTES = Math.min(8 * 1024 * 1024, Math.max(65536, Number(process.env.COLLECT_BATCH_BYTES ?? 1048576) || 1048576));
 var INTERN_RE = /\bintern(ship)?s?\b|\bco[- ]?op\b|\bapprentice(ship)?\b/i;
 var NEWGRAD_RE = /\bnew ?grad(uate)?\b|\buniversity grad(uate)?\b|\brecent grad(uate)?\b|\bcampus hire\b|\bgraduate (program|scheme|engineer|analyst)\b|\bclass of 20\d\d\b|\bearly career\b/i;
@@ -22420,22 +22434,27 @@ async function poll() {
         );
         measure.fetchMs += Date.now() - fetchStart;
         const rows = snapshot.jobs.map((job) => {
+          const preliminary = classify(job.title, job.structured_job_type, job.description);
           const employment = employmentTypeEvidence({
             title: job.title,
             description: job.description,
-            structured: job.structured_job_type
+            structured: job.structured_job_type,
+            kind: preliminary.kind
           });
           const structured_job_type = job.structured_job_type ?? (employment.conflict ? null : employment.type);
+          const { source_record_json, ...withoutRaw } = job;
           return {
-            ...job,
+            ...STORE_SNAPSHOTS ? job : withoutRaw,
             structured_job_type,
             employment_evidence: employment.items,
-            ...classify(job.title, structured_job_type, job.description)
+            ...classify(job.title, structured_job_type, job.description),
+            // Kept for pilot measurement only; not sent unless stored.
+            __sourceBytes: Buffer.byteLength(source_record_json, "utf8")
           };
         });
         if (PILOT)
           for (const row of rows) {
-            measure.sourceBytes += Buffer.byteLength(row.source_record_json, "utf8");
+            measure.sourceBytes += row.__sourceBytes;
             measure.descriptionChars += row.description?.length ?? 0;
             if (row.description) measure.withDescription++;
             if (row.structured_job_type) {
@@ -22454,7 +22473,7 @@ async function poll() {
               p_run_id: runId,
               p_checked_at: snapshot.checkedAt,
               p_source_url: snapshot.sourceUrl,
-              p_rows: slice,
+              p_rows: slice.map(({ __sourceBytes: _ignored, ...row }) => row),
               p_batch_index: index
             });
             measure.dbMs += Date.now() - dbStart;
@@ -22477,7 +22496,8 @@ async function poll() {
         for (let offset = 0; offset < rows.length; ) {
           let end = offset, total = 0;
           while (end < rows.length && end - offset < BATCH_MAX_ROWS) {
-            const size = Buffer.byteLength(JSON.stringify(rows[end]), "utf8");
+            const { __sourceBytes: _ignored, ...row } = rows[end];
+            const size = Buffer.byteLength(JSON.stringify(row), "utf8");
             if (total + size > BATCH_MAX_BYTES && end > offset) break;
             total += size;
             end++;

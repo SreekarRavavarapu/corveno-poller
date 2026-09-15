@@ -22,7 +22,7 @@ export type EmploymentType =
   | "temporary"
   | "apprenticeship";
 
-export type EmploymentEvidenceField = "structured" | "title" | "description";
+export type EmploymentEvidenceField = "structured" | "title" | "description" | "implied";
 export type EmploymentConfidence = "high" | "medium";
 
 export interface EmploymentEvidenceItem {
@@ -244,12 +244,29 @@ export function resolveEmploymentType(items: EmploymentEvidenceItem[]): Pick<Emp
   return { type: winner, confidence: high.length ? "high" : "medium", conflict: false };
 }
 
-export function employmentTypeEvidence(input: { title: string; description?: string | null; structured?: string | null }): EmploymentTypeEvidence {
+/** Any commitment marker in title or text. When NONE is present in a complete
+ * description the posting is treated as full-time with the reason recorded
+ * (owner decision, Sep 15, 2026: "commitment not stated"). */
+const COMMITMENT_MARKERS = /\b(?:part[- ]?time|full[- ]?time|contract(?:or|ual)?|fixed[- ]term|temporary|temp\b|seasonal|casual|freelance|hourly|per diem|prn|locum|zero[- ]hours?|intern(?:ship)?s?|co[- ]?op|apprentice(?:ship)?s?|working student|fellowship|volunteer|stage|stagiaire|alternance|cdd|cdi|temps (?:plein|partiel)|int[ée]rim|vacation)\b|正社員|契約社員|派遣|アルバイト|パート|インターン|業務委託|嘱託|臨時|フリーランス/i;
+
+export function impliedFullTime(input: { title: string; description: string; kind?: string | null }): EmploymentEvidenceItem | null {
+  if (input.kind === "intern") return null;
+  const text = `${input.title}\n${input.description}`.normalize("NFKC");
+  if (input.description.trim().length < 200) return null;
+  if (COMMITMENT_MARKERS.test(text)) return null;
+  return { type: "full_time", quote: "Commitment not stated: the posting mentions no part-time, contract, temporary, seasonal, internship or apprenticeship terms.", field: "implied", confidence: "medium" };
+}
+
+export function employmentTypeEvidence(input: { title: string; description?: string | null; structured?: string | null; kind?: string | null }): EmploymentTypeEvidence {
   const items: EmploymentEvidenceItem[] = [];
   if (input.structured && (EMPLOYMENT_TYPES as readonly string[]).includes(input.structured))
     items.push({ type: input.structured as EmploymentType, quote: input.structured, field: "structured", confidence: "high" });
   items.push(...titleItems(input.title ?? ""));
   if (input.description) items.push(...descriptionItems(input.description));
+  if (!items.length && input.description) {
+    const implied = impliedFullTime({ title: input.title ?? "", description: input.description, kind: input.kind ?? null });
+    if (implied) items.push(implied);
+  }
   const resolved = resolveEmploymentType(items);
   // A structured commitment type is authoritative among commitment types, but
   // internship-family title evidence still classifies the role as an internship.

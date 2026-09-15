@@ -25478,19 +25478,19 @@ function cut(s, n) {
   if (last >= 55296 && last <= 56319) t = t.slice(0, -1);
   return t;
 }
-async function pageAll(table, select, filter) {
+async function pageAll(table, select, filter, orderBy = "id") {
   const out = [];
   let cursor = null;
   for (; ; ) {
-    let q = supabase.from(table).select(select).order("id", { ascending: true }).limit(1e3);
-    if (cursor) q = q.gt("id", cursor);
+    let q = supabase.from(table).select(select).order(orderBy, { ascending: true }).limit(1e3);
+    if (cursor) q = q.gt(orderBy, cursor);
     if (filter) q = filter(q);
     const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
     const rows = data ?? [];
     out.push(...rows);
     if (rows.length < 1e3) break;
-    cursor = rows[rows.length - 1].id;
+    cursor = String(rows[rows.length - 1][orderBy]);
   }
   return out;
 }
@@ -25552,7 +25552,8 @@ async function seed() {
       (await pageAll(
         "corpus_listings",
         "id,source_uid,posted_at",
-        (q) => q.eq("source", s.source)
+        (q) => q.eq("source", s.source),
+        "source_uid"
       )).map((row) => [row.source_uid, row.posted_at])
     );
     const rows = [];

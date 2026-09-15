@@ -131,10 +131,15 @@ function cut(s: string, n: number): string {
 // Keyset pagination on the id PK: offset pagination over 300k+ rows hits the
 // Postgres statement timeout; cursoring on an indexed column stays fast at any
 // depth. Every caller's select must include "id".
-async function pageAll<T extends { id: string }>(
+async function pageAll<T extends Record<string, unknown>>(
   table: string,
   select: string,
   filter?: (q: any) => any,
+  // Keyset column. Must be unique within the filtered set and served by an
+  // index together with the filter: a source-scoped corpus read orders by
+  // source_uid (UNIQUE(source, source_uid)); ordering by id there made the
+  // planner walk the whole wide corpus in id order (statement timeout).
+  orderBy = "id",
 ): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | null = null;
@@ -142,16 +147,16 @@ async function pageAll<T extends { id: string }>(
     let q = supabase
       .from(table)
       .select(select)
-      .order("id", { ascending: true })
+      .order(orderBy, { ascending: true })
       .limit(1000);
-    if (cursor) q = q.gt("id", cursor);
+    if (cursor) q = q.gt(orderBy, cursor);
     if (filter) q = filter(q);
     const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
     const rows = (data ?? []) as unknown as T[];
     out.push(...rows);
     if (rows.length < 1000) break;
-    cursor = rows[rows.length - 1].id;
+    cursor = String(rows[rows.length - 1][orderBy]);
   }
   return out;
 }
@@ -243,6 +248,7 @@ async function seed() {
           posted_at: string | null;
         }>("corpus_listings", "id,source_uid,posted_at", (q) =>
           q.eq("source", s.source),
+          "source_uid",
         )
       ).map((row) => [row.source_uid, row.posted_at]),
     );

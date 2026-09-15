@@ -1,3 +1,4 @@
+"use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -6015,8 +6016,8 @@ var require_helpers = __commonJS({
         return null;
       }
       try {
-        const date = /* @__PURE__ */ new Date(`${apiVersion}T00:00:00.0Z`);
-        return date;
+        const date2 = /* @__PURE__ */ new Date(`${apiVersion}T00:00:00.0Z`);
+        return date2;
       } catch (_e) {
         return null;
       }
@@ -17601,9 +17602,9 @@ function createFetchClient(options) {
         },
         body: body ? JSON.stringify(body) : void 0
       });
-      const text = await res.text();
+      const text2 = await res.text();
       const isJson = (res.headers.get("content-type") || "").includes("application/json");
-      const data = isJson && text ? JSON.parse(text) : text;
+      const data = isJson && text2 ? JSON.parse(text2) : text2;
       if (!res.ok) {
         const errBody = isJson ? data : void 0;
         const errorDetail = errBody?.error;
@@ -21571,26 +21572,640 @@ function shouldShowDeprecationWarning() {
 if (shouldShowDeprecationWarning()) console.warn("\u26A0\uFE0F  Node.js 20 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 22 or later. For more information, visit: https://github.com/orgs/supabase/discussions/45715");
 
 // src/run.ts
+var import_node_crypto2 = require("node:crypto");
+
+// src/primary-source.ts
+var import_node_crypto = require("node:crypto");
+
+// src/country-evidence.ts
+var supportedMarketCodes = ["US", "CA", "AU", "GB", "IN", "SG", "JP"];
+var normalized = (value) => value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+var aliases = /* @__PURE__ */ new Map();
+for (const locale of ["en", "fr", "ja", "hi", "ta", "zh", "ms"]) {
+  const display = new Intl.DisplayNames([locale], { type: "region", fallback: "none" });
+  for (const code of supportedMarketCodes) {
+    const name = display.of(code);
+    if (name) aliases.set(normalized(name), code);
+  }
+}
+for (const [name, code] of [["United States of America", "US"], ["Great Britain", "GB"], ["\u65E5\u672C\u56FD", "JP"]]) aliases.set(normalized(name), code);
+function explicitCountryAlias(value) {
+  return typeof value === "string" ? aliases.get(normalized(value)) ?? null : null;
+}
+var escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var names = [...aliases.entries()].map(([name, country]) => ({ country, pattern: new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escape(name)}(?![\\p{L}\\p{M}\\p{N}])`, "giu"), name }));
+
+// src/primary-source.ts
+var CollectionError = class extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+};
+var object = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+var iso3 = {
+  USA: "US",
+  CAN: "CA",
+  AUS: "AU",
+  GBR: "GB",
+  IND: "IN",
+  SGP: "SG",
+  JPN: "JP",
+  DEU: "DE",
+  FRA: "FR",
+  IRL: "IE",
+  NLD: "NL",
+  NZL: "NZ",
+  CHE: "CH",
+  SWE: "SE",
+  ESP: "ES",
+  ITA: "IT",
+  POL: "PL",
+  CHN: "CN",
+  KOR: "KR",
+  HKG: "HK",
+  TWN: "TW",
+  BRA: "BR",
+  MEX: "MX",
+  ARE: "AE",
+  ISR: "IL",
+  ZAF: "ZA",
+  IDN: "ID",
+  MYS: "MY",
+  PHL: "PH",
+  VNM: "VN",
+  THA: "TH",
+  PRT: "PT",
+  AUT: "AT",
+  BEL: "BE",
+  DNK: "DK",
+  FIN: "FI",
+  NOR: "NO",
+  CZE: "CZ",
+  LUX: "LU",
+  ROU: "RO",
+  HUN: "HU",
+  GRC: "GR",
+  TUR: "TR",
+  ARG: "AR",
+  CHL: "CL",
+  COL: "CO",
+  PER: "PE",
+  PAK: "PK",
+  BGD: "BD",
+  LKA: "LK",
+  NPL: "NP",
+  EGY: "EG",
+  KEN: "KE",
+  NGA: "NG",
+  SAU: "SA",
+  QAT: "QA",
+  KWT: "KW",
+  BHR: "BH"
+};
+var regions = new Intl.DisplayNames(["en"], {
+  type: "region",
+  fallback: "none"
+});
+var excludedRegions = new Set(
+  "AC AN BU CP CS DD DG EA EU EZ FX IC NT QO SU TA TP UN XA XB YD YU ZR ZZ".split(
+    " "
+  )
+);
+var countryNames = /* @__PURE__ */ new Map([
+  ["united states of america", "US"]
+]);
+for (let a = 65; a <= 90; a++)
+  for (let b = 65; b <= 90; b++) {
+    const code = String.fromCharCode(a, b), name = regions.of(code);
+    if (name && !excludedRegions.has(code) && !countryNames.has(name.toLowerCase()))
+      countryNames.set(name.toLowerCase(), code);
+  }
+function explicitCountry(raw) {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim(), upper = value.toUpperCase();
+  if (upper === "UK") return "GB";
+  if (iso3[upper]) return iso3[upper];
+  if (/^[A-Z]{2}$/.test(upper) && !excludedRegions.has(upper) && regions.of(upper))
+    return upper;
+  return countryNames.get(value.toLowerCase()) ?? explicitCountryAlias(value);
+}
+function decodeEntities(raw) {
+  return raw.replace(
+    /&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi,
+    (all, name) => {
+      const n = name.toLowerCase();
+      if (n[0] === "#") {
+        const point = n[1] === "x" ? parseInt(n.slice(2), 16) : Number(n.slice(1));
+        return point > 0 && point <= 1114111 && !(point >= 55296 && point <= 57343) ? String.fromCodePoint(point) : all;
+      }
+      return {
+        amp: "&",
+        lt: "<",
+        gt: ">",
+        quot: '"',
+        apos: "'",
+        nbsp: " "
+      }[n] ?? all;
+    }
+  );
+}
+function plainText(raw) {
+  let html = raw;
+  const structure = "(?:html|body|p|div|span|ul|ol|li|h[1-6]|br|section|article|table|strong|em)";
+  const literalMarkup = new RegExp(`<\\/?${structure}\\b`, "i");
+  const escapedMarkup = new RegExp(
+    `&(?:amp;)?lt;\\/?${structure}(?:&|\\s|>)`,
+    "i"
+  );
+  for (let depth = 0; depth < 2 && !literalMarkup.test(html) && escapedMarkup.test(html); depth++)
+    html = decodeEntities(html);
+  const stripped = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<\s*(?:br\b[^>]*|\/(?:p|div|li|h[1-6]))\s*\/?>/gi, "\n").replace(
+    /<\/?(?:html|body|head|title|meta|link|a|abbr|address|article|aside|b|blockquote|button|caption|code|col|dd|del|details|div|dl|dt|em|fieldset|figcaption|figure|font|footer|form|h[1-6]|header|hr|i|iframe|img|input|label|legend|li|main|nav|ol|option|p|pre|s|section|select|small|span|strong|sub|summary|sup|table|tbody|td|textarea|th|thead|time|tr|u|ul)\b[^>]*>/gi,
+    " "
+  );
+  return decodeEntities(stripped).replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
+}
+function stable(value) {
+  return Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(
+    Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => [k, stable(v)])
+  ) : value;
+}
+function text(v) {
+  return typeof v === "string" ? v : null;
+}
+function date(v) {
+  if (v === null || v === void 0) return null;
+  const time = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+function employmentType(value) {
+  if (typeof value !== "string") return null;
+  return {
+    fulltime: "full_time",
+    parttime: "part_time",
+    intern: "internship",
+    internship: "internship",
+    contract: "contract",
+    contractor: "contract",
+    temporary: "temporary",
+    coop: "co_op",
+    apprenticeship: "apprenticeship",
+    research: "research"
+  }[value.toLowerCase().replace(/[\s_-]/g, "")] ?? null;
+}
+function worldwideEvidence(fields, job) {
+  const workplace = typeof job.workplaceType === "string" ? job.workplaceType.trim().toLowerCase() : null;
+  if (job.isRemote === false || workplace === "onsite" || workplace === "on-site" || workplace === "hybrid") return null;
+  const remote = workplace === "remote" ? { path: "workplaceType", value: job.workplaceType } : job.isRemote === true ? { path: "isRemote", value: true } : null;
+  const scope = "(?:worldwide|anywhere in the world)";
+  const combined = new RegExp(`^(?:remote\\s*(?:[-\u2013\u2014|:,/]\\s*)?${scope}|remote\\s*\\(\\s*${scope}\\s*\\)|${scope}\\s*(?:[-\u2013\u2014|:,/]\\s*)?remote)$`, "i");
+  for (const field of fields) {
+    if (typeof field.raw !== "string") continue;
+    const label = field.raw.trim().replace(/\s+/g, " ");
+    if (combined.test(label) || remote && new RegExp(`^${scope}$`, "i").test(label))
+      return { fieldPath: field.path, quote: field.raw, ...remote ? { remoteEvidence: remote } : {} };
+  }
+  return null;
+}
+function normalizeJob(ats, slug, raw) {
+  const j = object(raw), cats = object(j.categories), issues = [];
+  const uid = typeof j.id === "string" ? j.id : typeof j.id === "number" && Number.isSafeInteger(j.id) ? String(j.id) : null;
+  const title = text(ats === "lever" ? j.text : j.title), url = text(
+    ats === "greenhouse" ? j.absolute_url : ats === "lever" ? j.hostedUrl : j.jobUrl ?? j.applyUrl
+  );
+  if (!uid || !title?.trim() || !url || uid.length > 200 || title.length > 2e3 || url.length > 8192)
+    throw new CollectionError("MALFORMED_JOB");
+  try {
+    const u = new URL(url);
+    if (!["http:", "https:"].includes(u.protocol) || u.username || u.password)
+      throw Error();
+  } catch {
+    throw new CollectionError("MALFORMED_JOB_URL");
+  }
+  const rawJson = JSON.stringify(stable(j));
+  if (Buffer.byteLength(rawJson, "utf8") > 1048576)
+    throw new CollectionError("JOB_TOO_LARGE");
+  let description = null;
+  if (ats === "greenhouse")
+    description = text(j.content) !== null ? plainText(j.content) : null;
+  if (ats === "ashby")
+    description = text(j.descriptionHtml) ? plainText(j.descriptionHtml) : text(j.descriptionPlain);
+  if (ats === "lever") {
+    if (j.lists !== void 0 && (!Array.isArray(j.lists) || j.lists.some(
+      (item) => typeof object(item).content !== "string"
+    )))
+      throw new CollectionError("MALFORMED_DESCRIPTION_LISTS");
+    const body = text(j.descriptionPlain) ?? (text(j.description) ? plainText(j.description) : null);
+    const lists = (j.lists ?? []).map(
+      (item) => [text(item.text), plainText(item.content)].filter(Boolean).join("\n")
+    );
+    const additional = text(j.additionalPlain) ?? (text(j.additional) ? plainText(j.additional) : null);
+    description = [body, ...lists, additional].filter(Boolean).join("\n\n") || null;
+  }
+  const originalDescription = description;
+  if (description?.includes("\0")) {
+    description = description.replaceAll("\0", "");
+    issues.push("description:nul-removed-in-readable-copy-original-retained");
+  }
+  const locationFields = ats === "greenhouse" ? [{ path: "location.name", raw: object(j.location).name }] : ats === "lever" ? [
+    { path: "categories.location", raw: cats.location },
+    ...Array.isArray(cats.allLocations) ? cats.allLocations.map((raw2, i) => ({ path: `categories.allLocations[${i}]`, raw: raw2 })) : []
+  ] : [
+    { path: "location", raw: j.location },
+    ...Array.isArray(j.secondaryLocations) ? j.secondaryLocations.map((location2, i) => ({ path: `secondaryLocations[${i}].location`, raw: object(location2).location })) : []
+  ];
+  const locations = locationFields.map((field) => field.raw);
+  const countryFields = ats === "lever" ? [{ path: "country", raw: j.country }] : ats === "ashby" ? [
+    {
+      path: "address.postalAddress.addressCountry",
+      raw: object(object(j.address).postalAddress).addressCountry
+    },
+    ...Array.isArray(j.secondaryLocations) ? j.secondaryLocations.map((l, i) => ({
+      path: `secondaryLocations[${i}].address.addressCountry`,
+      raw: object(object(l).address).addressCountry
+    })) : []
+  ] : [];
+  const evidence = countryFields.filter(
+    (f) => f.raw !== null && f.raw !== void 0
+  ), countries = [
+    ...new Set(
+      evidence.map((f) => explicitCountry(f.raw)).filter((v) => v !== null)
+    )
+  ];
+  for (const f of evidence)
+    if (!explicitCountry(f.raw)) issues.push(`country:unrecognized:${f.path}`);
+  const worldwide = worldwideEvidence([...locationFields, ...countryFields], j);
+  const structuredType = text(
+    ats === "lever" ? cats.commitment : ats === "ashby" ? j.employmentType : null
+  );
+  const listed = ats !== "ashby" || j.isListed !== false;
+  if (ats === "ashby" && j.isListed !== void 0 && typeof j.isListed !== "boolean")
+    throw new CollectionError("MALFORMED_VISIBILITY");
+  return {
+    uid,
+    title,
+    url,
+    locations: [
+      ...new Set(
+        locations.filter(
+          (l) => typeof l === "string" && Boolean(l.trim())
+        )
+      )
+    ],
+    posted_at: date(
+      ats === "lever" ? j.createdAt : ats === "ashby" ? j.publishedAt : j.first_published
+    ),
+    updated_at: date(j.updated_at),
+    structuredType,
+    structured_job_type: employmentType(structuredType),
+    description,
+    description_complete: Boolean(originalDescription?.trim()) && description === originalDescription,
+    country_codes: countries,
+    country_evidence: {
+      source: `${ats}-api`,
+      fieldPaths: evidence.map((f) => f.path),
+      rawValues: evidence.map((f) => f.raw),
+      ...worldwide ? { remote_scope: "worldwide", worldwide_evidence: worldwide } : {}
+    },
+    is_publicly_listed: listed,
+    source_record_json: rawJson,
+    source_content_sha256: (0, import_node_crypto.createHash)("sha256").update(rawJson).digest("hex"),
+    issues
+  };
+}
+function parseBoardResponse(ats, slug, data) {
+  const wrapper = object(data), rows = ats === "lever" ? data : wrapper.jobs;
+  if (!Array.isArray(rows)) throw new CollectionError("MALFORMED_BOARD");
+  if (ats === "greenhouse" && (!Number.isSafeInteger(object(wrapper.meta).total) || object(wrapper.meta).total !== rows.length))
+    throw new CollectionError("INCOMPLETE_BOARD");
+  for (const key of [
+    "next",
+    "nextPage",
+    "nextCursor",
+    "hasMore",
+    "hasNextPage"
+  ]) {
+    if (wrapper[key]) throw new CollectionError("UNEXPECTED_PAGINATION");
+  }
+  if (rows.length > 5e4) throw new CollectionError("TOO_MANY_JOBS");
+  const jobs = rows.map((row) => normalizeJob(ats, slug, row));
+  if (new Set(jobs.map((j) => j.uid)).size !== jobs.length)
+    throw new CollectionError("DUPLICATE_JOB_ID");
+  return jobs;
+}
+function boardUrl(ats, slug, eu = false) {
+  if (!/^[A-Za-z0-9_.-]{1,200}$/.test(slug))
+    throw new CollectionError("INVALID_BOARD");
+  const board = encodeURIComponent(slug);
+  return ats === "greenhouse" ? `https://boards-api.greenhouse.io/v1/boards/${board}/jobs?content=true` : ats === "lever" ? `https://api.${eu ? "eu." : ""}lever.co/v0/postings/${board}?mode=json` : `https://api.ashbyhq.com/posting-api/job-board/${board}`;
+}
+async function abortable(pending, signal) {
+  if (signal.aborted) throw new CollectionError("BODY_TIMEOUT");
+  let abort = () => {
+  };
+  const cancellation = new Promise((_, reject) => {
+    abort = () => reject(new CollectionError("BODY_TIMEOUT"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([pending, cancellation]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs = 3e4, allowPlainJson = false) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await abortable(
+      fetcher(url, {
+        signal: controller.signal,
+        redirect: "error",
+        headers: {
+          "User-Agent": "Corveno corpus (hello@corveno.io)",
+          Accept: "application/json"
+        }
+      }),
+      controller.signal
+    );
+    if (!response.ok) throw new CollectionError(`HTTP_${response.status}`);
+    if (response.status === 206 || response.headers.has("content-range"))
+      throw new CollectionError("PARTIAL_RESPONSE");
+    if (!/\bjson\b/i.test(response.headers.get("content-type") ?? "") && !(allowPlainJson && /^text\/plain\b/i.test(response.headers.get("content-type") ?? "")))
+      throw new CollectionError("NOT_JSON");
+    if (Number(response.headers.get("content-length")) > maxBytes)
+      throw new CollectionError("BODY_TOO_LARGE");
+    const reader = response.body?.getReader();
+    if (!reader) throw new CollectionError("EMPTY_RESPONSE");
+    const chunks = [];
+    let count = 0;
+    try {
+      for (; ; ) {
+        const part = await abortable(reader.read(), controller.signal);
+        if (part.done) break;
+        count += part.value.byteLength;
+        if (count > maxBytes) throw new CollectionError("BODY_TOO_LARGE");
+        chunks.push(part.value);
+      }
+    } finally {
+      void reader.cancel().catch(() => {
+      });
+    }
+    try {
+      return JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
+      );
+    } catch {
+      throw new CollectionError("INVALID_JSON");
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function fetchPrimaryBoard(ats, slug, fetcher = fetch, eu = false) {
+  const url = boardUrl(ats, slug, eu), started = Date.now();
+  if (ats !== "lever")
+    return {
+      jobs: parseBoardResponse(ats, slug, await boundedJson(url, fetcher)),
+      checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      sourceUrl: url
+    };
+  const jobs = [], ids = /* @__PURE__ */ new Set();
+  let bytes = 0;
+  for (let skip = 0; skip <= 5e4; ) {
+    if (Date.now() - started > 6e4)
+      throw new CollectionError("BOARD_TIMEOUT");
+    const page = await boundedJson(
+      `${url}&limit=100&skip=${skip}`,
+      fetcher,
+      8388608,
+      Math.min(3e4, 6e4 - (Date.now() - started))
+    );
+    const normalized2 = parseBoardResponse(ats, slug, page);
+    if (normalized2.length > 100)
+      throw new CollectionError("PAGINATION_IGNORED");
+    for (const job of normalized2) {
+      if (ids.has(job.uid)) throw new CollectionError("UNSTABLE_PAGINATION");
+      ids.add(job.uid);
+      jobs.push(job);
+      bytes += Buffer.byteLength(job.source_record_json);
+      if (bytes > 25165824) throw new CollectionError("BOARD_TOO_LARGE");
+    }
+    if (normalized2.length === 0)
+      return { jobs, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), sourceUrl: url };
+    skip += normalized2.length;
+  }
+  throw new CollectionError("TOO_MANY_JOBS");
+}
+
+// src/employment-evidence.ts
+var EMPLOYMENT_TYPES = [
+  "internship",
+  "full_time",
+  "part_time",
+  "contract",
+  "research",
+  "co_op",
+  "temporary",
+  "apprenticeship"
+];
+var INTERNSHIP_FAMILY = ["internship", "co_op", "apprenticeship"];
+var MAX_QUOTE = 160;
+function employmentTypeFromLabel(raw) {
+  const value = raw.normalize("NFKC").toLowerCase().replace(/[\s_/-]+/g, " ").trim();
+  if (!value) return null;
+  const exact = {
+    "full time": { type: "full_time", confidence: "high" },
+    fulltime: { type: "full_time", confidence: "high" },
+    "full time employee": { type: "full_time", confidence: "high" },
+    "full time permanent": { type: "full_time", confidence: "high" },
+    "permanent full time": { type: "full_time", confidence: "high" },
+    permanent: { type: "full_time", confidence: "medium" },
+    regular: { type: "full_time", confidence: "medium" },
+    "regular full time": { type: "full_time", confidence: "high" },
+    "part time": { type: "part_time", confidence: "high" },
+    parttime: { type: "part_time", confidence: "high" },
+    "part time permanent": { type: "part_time", confidence: "high" },
+    "permanent part time": { type: "part_time", confidence: "high" },
+    intern: { type: "internship", confidence: "high" },
+    internship: { type: "internship", confidence: "high" },
+    "internship full time": { type: "internship", confidence: "high" },
+    "full time internship": { type: "internship", confidence: "high" },
+    "co op": { type: "co_op", confidence: "high" },
+    coop: { type: "co_op", confidence: "high" },
+    contract: { type: "contract", confidence: "high" },
+    contractor: { type: "contract", confidence: "high" },
+    contractual: { type: "contract", confidence: "high" },
+    "fixed term": { type: "contract", confidence: "high" },
+    "fixed term contract": { type: "contract", confidence: "high" },
+    "full time contract": { type: "contract", confidence: "high" },
+    "contract full time": { type: "contract", confidence: "high" },
+    freelance: { type: "contract", confidence: "high" },
+    "contract to hire": { type: "contract", confidence: "high" },
+    temporary: { type: "temporary", confidence: "high" },
+    temp: { type: "temporary", confidence: "high" },
+    seasonal: { type: "temporary", confidence: "high" },
+    casual: { type: "temporary", confidence: "medium" },
+    "temporary full time": { type: "temporary", confidence: "high" },
+    apprenticeship: { type: "apprenticeship", confidence: "high" },
+    apprentice: { type: "apprenticeship", confidence: "high" },
+    research: { type: "research", confidence: "medium" }
+  };
+  if (exact[value]) return exact[value];
+  const head2 = value.replace(/\(.*?\)/g, " ").split(/[,;|]/)[0].trim();
+  if (head2 && exact[head2]) return exact[head2];
+  return null;
+}
+var quoteOf = (text2, index, length) => {
+  const start = Math.max(0, index - 40);
+  const end = Math.min(text2.length, index + length + 60);
+  return text2.slice(start, end).replace(/\s+/g, " ").trim().slice(0, MAX_QUOTE);
+};
+var STUDY_CONTEXT = /\b(?:student|students|study|studies|studying|enrol+ed|enrolment|enrollment|degree|programme|program|course|education|university|college|school)\b/i;
+function titleItems(rawTitle) {
+  const title = rawTitle.normalize("NFKC");
+  const items = [];
+  const push = (type, match, confidence) => {
+    if (match && match.index !== void 0) items.push({ type, quote: quoteOf(title, match.index, match[0].length), field: "title", confidence });
+  };
+  const administrative = /\b(?:intern(?:ship)?s?|co[- ]?ops?)\s+(?:program(?:me)?\s+(?:manager|coordinator|director|lead)|recruit(?:er|ing|ment)|hiring|talent|coordinator|manager)\b/i;
+  const stripped = title.replace(administrative, " ");
+  push("internship", stripped.match(/\bintern(?:ship)?s?\b/i), "high");
+  push("internship", stripped.match(/\bworking student\b/i), "medium");
+  push("internship", stripped.match(/インターン(?:シップ)?/), "high");
+  push("co_op", stripped.match(/\bco[- ]?op\b/i), "high");
+  push("apprenticeship", stripped.match(/\bapprentice(?:ship)?s?\b/i), "high");
+  push("apprenticeship", stripped.match(/\b(?:alternance|apprenti(?:e|s)?)\b/i), "high");
+  push("part_time", title.match(/\bpart[- ]time\b/i), "high");
+  push("part_time", title.match(/\btemps partiel\b/i), "high");
+  push("part_time", title.match(/(?:パート(?:タイム)?|アルバイト)/), "high");
+  push("contract", title.match(/\b(?:contractor|contractual|fixed[- ]term|freelance|FTC)\b/i), "high");
+  push("contract", title.match(/\bcontract\b/i), "medium");
+  push("contract", title.match(/\bCDD\b/), "high");
+  push("contract", title.match(/(?:契約社員|業務委託)/), "high");
+  push("temporary", title.match(/\b(?:temporary|temp|seasonal)\b/i), "high");
+  push("temporary", title.match(/\bcasual\b/i), "medium");
+  push("temporary", title.match(/(?:派遣|臨時)/), "high");
+  push("full_time", title.match(/\bfull[- ]time\b/i), "medium");
+  push("full_time", title.match(/\btemps plein\b/i), "high");
+  push("full_time", title.match(/正社員/), "high");
+  push("full_time", title.match(/\bCDI\b/), "medium");
+  push("research", title.match(/\b(?:postdoc(?:toral)?|post-doctoral|research fellow)\b/i), "medium");
+  return items;
+}
+function descriptionItems(rawDescription) {
+  const text2 = rawDescription.normalize("NFKC");
+  const items = [];
+  const push = (type, index, length, confidence) => {
+    items.push({ type, quote: quoteOf(text2, index, length), field: "description", confidence });
+  };
+  const typed = /\b(?:employment|job|position|contract|worker|work|time|role|engagement|hours)\s*(?:type|category|status)?\s*[:\-–|]\s*([A-Za-z][A-Za-z0-9 /,()-]{1,40})/gi;
+  for (const match of text2.matchAll(typed)) {
+    if (!/type|category|status|hours|schedule/i.test(match[0].split(/[:\-–|]/)[0]) && !/\bhours\b/i.test(match[0])) continue;
+    const label = employmentTypeFromLabel(match[1]);
+    if (label && match.index !== void 0) push(label.type, match.index, match[0].length, label.confidence);
+  }
+  const schedule = /\bschedule\s*[:\-–|]\s*(full[- ]?time|part[- ]?time)\b/gi;
+  for (const match of text2.matchAll(schedule)) {
+    const label = employmentTypeFromLabel(match[1]);
+    if (label && match.index !== void 0) push(label.type, match.index, match[0].length, "high");
+  }
+  const sentence = /\bthis (?:is (?:a|an)|(?:position|role|job|opportunity) is (?:a|an))\s+(?:[\w-]+\s+){0,3}?(full[- ]time|part[- ]time|contract|temporary|fixed[- ]term|internship|co[- ]?op|apprenticeship|seasonal|freelance)\b/gi;
+  for (const match of text2.matchAll(sentence)) {
+    const label = employmentTypeFromLabel(match[1]);
+    if (!label || match.index === void 0) continue;
+    const tail = text2.slice(match.index + match[0].length, match.index + match[0].length + 30);
+    if (STUDY_CONTEXT.test(tail)) continue;
+    const commitment = tail.match(/^\s+(contract(?:or)?|fixed[- ]term|temporary|temp|seasonal|internship|intern|co[- ]?op|apprenticeship)\b/i);
+    const type = commitment ? employmentTypeFromLabel(commitment[1])?.type ?? label.type : label.type;
+    push(type, match.index, match[0].length + (commitment ? commitment[0].length : 0), "high");
+  }
+  const prose = /\b(full[- ]time|part[- ]time|temporary|seasonal|fixed[- ]term)\s+(?:position|role|opportunity|employment|job|hours|basis|contract)\b/gi;
+  for (const match of text2.matchAll(prose)) {
+    if (match.index === void 0) continue;
+    const before = text2.slice(Math.max(0, match.index - 25), match.index);
+    const after = text2.slice(match.index + match[0].length, match.index + match[0].length + 25);
+    if (STUDY_CONTEXT.test(before) || STUDY_CONTEXT.test(after)) continue;
+    const label = employmentTypeFromLabel(match[1]);
+    if (!label) continue;
+    const isContract = /\bcontract\b/i.test(match[0]) && label.type !== "contract";
+    push(isContract ? "contract" : label.type, match.index, match[0].length, "medium");
+  }
+  const ja = /雇用形態\s*[:：]?\s*(正社員|契約社員|パート(?:タイム)?|アルバイト|派遣(?:社員)?|業務委託|インターン(?:シップ)?|嘱託)/g;
+  for (const match of text2.matchAll(ja)) {
+    if (match.index === void 0) continue;
+    const map = { \u6B63\u793E\u54E1: "full_time", \u5951\u7D04\u793E\u54E1: "contract", \u30D1\u30FC\u30C8: "part_time", \u30D1\u30FC\u30C8\u30BF\u30A4\u30E0: "part_time", \u30A2\u30EB\u30D0\u30A4\u30C8: "part_time", \u6D3E\u9063: "temporary", \u6D3E\u9063\u793E\u54E1: "temporary", \u696D\u52D9\u59D4\u8A17: "contract", \u30A4\u30F3\u30BF\u30FC\u30F3: "internship", \u30A4\u30F3\u30BF\u30FC\u30F3\u30B7\u30C3\u30D7: "internship", \u5631\u8A17: "contract" };
+    const type = map[match[1]];
+    if (type) push(type, match.index, match[0].length, "high");
+  }
+  const fr = /\btype\s+(?:de\s+)?(?:contrat|poste|d'emploi|emploi)\s*[:\-–]\s*([A-Za-zÀ-ÿ' -]{2,30})/gi;
+  for (const match of text2.matchAll(fr)) {
+    if (match.index === void 0) continue;
+    const v = match[1].normalize("NFKC").toLowerCase().trim();
+    const type = /^cdi\b/.test(v) ? "full_time" : /^cdd\b|^contrat/.test(v) ? "contract" : /^stage\b|^stagiaire/.test(v) ? "internship" : /^alternance|^apprenti/.test(v) ? "apprenticeship" : /^temps partiel/.test(v) ? "part_time" : /^temps plein/.test(v) ? "full_time" : /^int[ée]rim|^temporaire|^saisonnier/.test(v) ? "temporary" : null;
+    if (type) push(type, match.index, match[0].length, /^cdi\b/.test(v) ? "medium" : "high");
+  }
+  return items;
+}
+var rank = {
+  internship: 8,
+  co_op: 8,
+  apprenticeship: 8,
+  research: 5,
+  contract: 4,
+  temporary: 4,
+  part_time: 3,
+  full_time: 1
+};
+function resolveEmploymentType(items) {
+  if (!items.length) return { type: null, confidence: null, conflict: false };
+  const family = items.filter((item) => INTERNSHIP_FAMILY.includes(item.type));
+  if (family.length) {
+    const best = [...family].sort((a, b) => a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1)[0];
+    return { type: best.type, confidence: best.confidence, conflict: false };
+  }
+  const high = items.filter((item) => item.confidence === "high");
+  const pool = high.length ? high : items;
+  const types = [...new Set(pool.map((item) => item.type))];
+  if (high.length && types.includes("full_time") && types.includes("part_time"))
+    return { type: null, confidence: null, conflict: true };
+  const winner = types.sort((a, b) => rank[b] - rank[a])[0];
+  return { type: winner, confidence: high.length ? "high" : "medium", conflict: false };
+}
+function employmentTypeEvidence(input) {
+  const items = [];
+  if (input.structured && EMPLOYMENT_TYPES.includes(input.structured))
+    items.push({ type: input.structured, quote: input.structured, field: "structured", confidence: "high" });
+  items.push(...titleItems(input.title ?? ""));
+  if (input.description) items.push(...descriptionItems(input.description));
+  const resolved = resolveEmploymentType(items);
+  if (input.structured && resolved.type && !INTERNSHIP_FAMILY.includes(resolved.type) && EMPLOYMENT_TYPES.includes(input.structured))
+    return { type: input.structured, confidence: "high", conflict: false, items };
+  return { ...resolved, items };
+}
+
+// src/run.ts
 var supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false } }
 );
-var UA = { "User-Agent": "corveno-corpus (hello@corveno.io)" };
-var CONCURRENCY = 40;
-var SEEN_BUMP_STALE_MS = 4 * 60 * 60 * 1e3;
-var CLOSE_STALE_MS = 13 * 60 * 60 * 1e3;
+var CONCURRENCY = 8;
+var BOARD_LIMIT = Math.max(0, Number(process.env.COLLECT_BOARD_LIMIT ?? 0) || 0);
+var ATS_FILTER = (process.env.COLLECT_ATS ?? "all").toLowerCase();
+var TIER_FILTER = (process.env.COLLECT_TIER ?? "all").toLowerCase();
+var PILOT = process.env.COLLECT_PILOT === "1";
 var INTERN_RE = /\bintern(ship)?s?\b|\bco[- ]?op\b|\bapprentice(ship)?\b/i;
 var NEWGRAD_RE = /\bnew ?grad(uate)?\b|\buniversity grad(uate)?\b|\brecent grad(uate)?\b|\bcampus hire\b|\bgraduate (program|scheme|engineer|analyst)\b|\bclass of 20\d\d\b|\bearly career\b/i;
 var TERM_RE = /\b(summer|fall|spring|winter)\s*'?(20)?(2[5-9])\b/gi;
 var GRAD_RE = /\b(?:class of|graduating(?: in| by)?|expected graduation[:\s]*)\s*(20\d\d)\b/i;
 var SPONSOR_NO_RE = /not (?:able to )?sponsor|unable to sponsor|without (?:the need for )?sponsorship|no sponsorship|sponsorship is not available/i;
-var SPONSOR_CIT_RE = /u\.?s\.? citizen(ship)?(?: is)? required|citizens? only|security clearance|export control|itar/i;
+var SPONSOR_CIT_RE = /u\.?s\.? citizen(ship)?(?: is)? required|citizens? only/i;
 var SPONSOR_YES_RE = /sponsorship (?:is )?available|will sponsor|able to sponsor/i;
 function classify(title, structuredType, description) {
   let kind = "other";
   let source = "regex";
-  if (structuredType && /intern/i.test(structuredType)) {
+  if (structuredType === "internship") {
     kind = "intern";
     source = "structured";
   } else if (INTERN_RE.test(title)) kind = "intern";
@@ -21636,65 +22251,6 @@ function cut(s, n) {
   if (last >= 55296 && last <= 56319) t = t.slice(0, -1);
   return t;
 }
-function stripHtml(s) {
-  if (!s) return null;
-  return cut(clean(s).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(), 2e4);
-}
-async function fetchBoard(ats, slug) {
-  try {
-    if (ats === "greenhouse") {
-      const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`, { headers: UA });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data.jobs ?? []).map((j) => ({
-        uid: String(j.id),
-        title: String(j.title ?? ""),
-        url: String(j.absolute_url ?? `https://job-boards.greenhouse.io/${slug}/jobs/${j.id}`),
-        locations: j.location ? [String(j.location.name ?? "")] : [],
-        posted_at: j.first_published ?? null,
-        updated_at: j.updated_at ?? null,
-        structuredType: null,
-        description: null
-      }));
-    }
-    if (ats === "lever") {
-      const res = await fetch(`https://api.lever.co/v0/postings/${slug}?mode=json`, { headers: UA });
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (!Array.isArray(data)) return null;
-      return data.map((j) => {
-        const cats = j.categories ?? {};
-        return {
-          uid: String(j.id),
-          title: String(j.text ?? ""),
-          url: String(j.hostedUrl ?? `https://jobs.lever.co/${slug}/${j.id}`),
-          locations: [cats.location, ...cats.allLocations ?? []].filter(Boolean).map(String),
-          posted_at: j.createdAt ? new Date(Number(j.createdAt)).toISOString() : null,
-          updated_at: null,
-          structuredType: cats.commitment ?? null,
-          description: stripHtml(j.descriptionPlain ?? j.description)
-        };
-      });
-    }
-    if (ats === "ashby") {
-      const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}`, { headers: UA });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data.jobs ?? []).filter((j) => j.isListed !== false).map((j) => ({
-        uid: String(j.id),
-        title: String(j.title ?? ""),
-        url: String(j.jobUrl ?? j.applyUrl ?? ""),
-        locations: [j.location, ...(j.secondaryLocations ?? []).map((s) => s.location)].filter(Boolean).map(String),
-        posted_at: j.publishedAt ?? null,
-        updated_at: null,
-        structuredType: j.employmentType ?? null,
-        description: stripHtml(j.descriptionPlain)
-      }));
-    }
-  } catch {
-  }
-  return null;
-}
 async function pageAll(table, select, filter) {
   const out = [];
   let cursor = null;
@@ -21715,14 +22271,29 @@ async function upsertBatches(table, rows, conflict, label) {
   for (let i = 0; i < rows.length; i += 500) {
     const { error } = await supabase.from(table).upsert(rows.slice(i, i + 500), { onConflict: conflict });
     if (error) throw new Error(`${label} @${i}: ${error.message}`);
-    if (i % 5e3 === 0) process.stdout.write(`\r${label}: ${Math.min(i + 500, rows.length)}/${rows.length}`);
+    if (i % 5e3 === 0)
+      process.stdout.write(
+        `\r${label}: ${Math.min(i + 500, rows.length)}/${rows.length}`
+      );
   }
   if (rows.length) console.log(`\r${label}: ${rows.length}/${rows.length}`);
 }
 var SEEDS = [
-  { url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json", source: "simplify-intern", kind: "intern" },
-  { url: "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json", source: "simplify-newgrad", kind: "new_grad" },
-  { url: "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json", source: "vansh-intern", kind: "intern" }
+  {
+    url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+    source: "simplify-intern",
+    kind: "intern"
+  },
+  {
+    url: "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
+    source: "simplify-newgrad",
+    kind: "new_grad"
+  },
+  {
+    url: "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
+    source: "vansh-intern",
+    kind: "intern"
+  }
 ];
 var SPONSOR_MAP = {
   "Offers Sponsorship": "offers",
@@ -21736,16 +22307,31 @@ function epochToIso(v) {
 }
 async function seed() {
   for (const s of SEEDS) {
-    const res = await fetch(s.url, { headers: UA });
-    if (!res.ok) {
-      console.warn(`${s.source}: ${res.status} \u2014 skipped`);
+    let listings;
+    try {
+      listings = await boundedJson(s.url, fetch, 25165824, 3e4, true);
+    } catch {
+      console.warn(`${s.source}: source unavailable \u2014 skipped`);
       continue;
     }
-    const listings = await res.json();
+    if (!Array.isArray(listings) || listings.some(
+      (l) => !l || typeof l.id !== "string" || !l.id || typeof l.url !== "string" || !l.url || typeof l.company_name !== "string" || !l.company_name || typeof l.title !== "string" || !l.title
+    )) {
+      console.warn(`${s.source}: incomplete or malformed source \u2014 skipped`);
+      continue;
+    }
+    const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const prior = new Map(
+      (await pageAll(
+        "corpus_listings",
+        "id,source_uid,posted_at",
+        (q) => q.eq("source", s.source)
+      )).map((row) => [row.source_uid, row.posted_at])
+    );
     const rows = [];
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
-      const active = l.active !== false && l.is_visible !== false;
+      const active = l.active !== false;
       rows.push({
         source: s.source,
         source_uid: l.id,
@@ -21757,10 +22343,13 @@ async function seed() {
         terms: l.terms ?? (l.season ? [l.season] : []),
         sponsorship: SPONSOR_MAP[l.sponsorship ?? ""] ?? "unknown",
         status: active ? "active" : "closed",
-        posted_at: epochToIso(l.date_posted),
+        posted_at: prior.get(l.id) ?? epochToIso(l.date_posted),
         updated_at_source: epochToIso(l.date_updated),
         closed_at: active ? null : epochToIso(l.date_updated),
-        classify_source: "seed"
+        classify_source: "seed",
+        source_checked_at: checkedAt,
+        last_seen_at: checkedAt,
+        is_publicly_listed: l.is_visible !== false
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
@@ -21769,177 +22358,207 @@ async function seed() {
 async function poll() {
   const boards = await pageAll(
     "ats_companies",
-    "id, name, ats, board_token, tier",
-    (q) => q.eq("verify_status", "active")
+    "id,name,ats,board_token,board_url,tier",
+    (q) => q.in("ats", ["greenhouse", "lever", "ashby"]).in("verify_status", ["active", "empty"])
   );
-  boards.sort((a, b) => (a.tier === "intern-proven" ? -1 : 0) - (b.tier === "intern-proven" ? -1 : 0));
-  console.log(`polling ${boards.length} boards\u2026`);
-  const existing = /* @__PURE__ */ new Map();
-  const rowsExisting = await pageAll(
-    "corpus_listings",
-    "id, source, source_uid, status, missed_polls, last_seen_at",
-    (q) => q.in("source", ["greenhouse", "lever", "ashby"])
+  boards.sort(
+    (a, b) => Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven")
   );
-  for (const r of rowsExisting) {
-    existing.set(`${r.source}:${r.source_uid}`, { id: r.id, status: r.status, missed: r.missed_polls, lastSeen: new Date(r.last_seen_at).getTime() });
+  let selected = boards.filter(
+    (b) => (ATS_FILTER === "all" || b.ats === ATS_FILTER) && (TIER_FILTER === "all" || b.tier === TIER_FILTER)
+  );
+  if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
+  console.log(
+    `boards: ${selected.length} selected of ${boards.length} (ats=${ATS_FILTER}, tier=${TIER_FILTER}, limit=${BOARD_LIMIT || "none"})`
+  );
+  const queue = [...selected], stats = { completed: 0, failed: 0, postings: 0 }, measure = {
+    sourceBytes: 0,
+    descriptionChars: 0,
+    withDescription: 0,
+    typed: 0,
+    typedFromStructured: 0,
+    typedFromText: 0,
+    withCountry: 0,
+    batches: 0,
+    written: 0,
+    unchanged: 0,
+    bumped: 0,
+    fetchMs: 0,
+    dbMs: 0,
+    failures: {}
+  };
+  async function rpc(name, args) {
+    const { data, error } = await supabase.rpc(name, args);
+    if (error)
+      throw new CollectionError(`DATABASE_${error.code ?? "UNAVAILABLE"}`);
+    return data;
   }
-  console.log(`existing polled listings: ${existing.size}`);
-  const nowMs = Date.now();
-  const now = new Date(nowMs).toISOString();
-  const seen = /* @__PURE__ */ new Set();
-  const newRows = [];
-  const bumpIds = [];
-  const reopenIds = [];
-  const stats = { boards: 0, failed: 0, postings: 0 };
-  const failedBoards = /* @__PURE__ */ new Set();
-  const queue = [...boards];
   const worker = async () => {
     for (; ; ) {
-      const b = queue.shift();
-      if (!b) return;
-      const jobs = await fetchBoard(b.ats, b.board_token);
-      stats.boards++;
-      if (jobs === null) {
-        stats.failed++;
-        failedBoards.add(`${b.ats}:${b.board_token}`);
-        await supabase.from("ats_companies").update({ last_polled_at: now, last_poll_status: "error" }).eq("id", b.id);
-        continue;
-      }
-      stats.postings += jobs.length;
-      for (const j of jobs) {
-        if (!j.uid || !j.title || !j.url) continue;
-        const cls = classify(j.title, j.structuredType, j.description);
-        const key = `${b.ats}:${b.board_token}:${j.uid}`;
-        seen.add(key);
-        const ex = existing.get(key);
-        if (!ex) {
-          const keepFull = cls.kind !== "other";
-          newRows.push({
-            company_id: b.id,
-            source: b.ats,
-            source_uid: `${b.board_token}:${j.uid}`,
-            company_name: cut(clean(b.name), 200),
-            title: cut(clean(j.title), 300),
-            canonical_url: cut(clean(j.url), 800),
-            locations: j.locations.map((l) => cut(clean(l), 120)),
-            description: keepFull ? j.description : j.description ? cut(j.description, 1500) : null,
-            kind: cls.kind,
-            terms: cls.terms,
-            grad_year: cls.grad_year,
-            sponsorship: cls.sponsorship,
-            status: "active",
-            posted_at: j.posted_at,
-            updated_at_source: j.updated_at,
-            classify_source: cls.classify_source
+      const board = queue.shift();
+      if (!board) return;
+      const runId = (0, import_node_crypto2.randomUUID)();
+      let started = false;
+      try {
+        await rpc("begin_corpus_collection", {
+          p_company_id: board.id,
+          p_run_id: runId
+        });
+        started = true;
+        const eu = board.ats === "lever" && Boolean(
+          board.board_url && new URL(board.board_url).hostname === "jobs.eu.lever.co"
+        );
+        const fetchStart = Date.now();
+        const snapshot = await fetchPrimaryBoard(
+          board.ats,
+          board.board_token,
+          fetch,
+          eu
+        );
+        measure.fetchMs += Date.now() - fetchStart;
+        const rows = snapshot.jobs.map((job) => {
+          const employment = employmentTypeEvidence({
+            title: job.title,
+            description: job.description,
+            structured: job.structured_job_type
           });
-        } else if (ex.status === "closed") {
-          reopenIds.push(ex.id);
-        } else if (nowMs - ex.lastSeen > SEEN_BUMP_STALE_MS || ex.missed > 0) {
-          bumpIds.push(ex.id);
+          const structured_job_type = job.structured_job_type ?? (employment.conflict ? null : employment.type);
+          return {
+            ...job,
+            structured_job_type,
+            employment_evidence: employment.items,
+            ...classify(job.title, structured_job_type, job.description)
+          };
+        });
+        if (PILOT)
+          for (const row of rows) {
+            measure.sourceBytes += Buffer.byteLength(row.source_record_json, "utf8");
+            measure.descriptionChars += row.description?.length ?? 0;
+            if (row.description) measure.withDescription++;
+            if (row.structured_job_type) {
+              measure.typed++;
+              if (row.employment_evidence.some((i) => i.field === "structured")) measure.typedFromStructured++;
+              else measure.typedFromText++;
+            }
+            if (row.country_codes.length) measure.withCountry++;
+          }
+        let batchIndex = 0;
+        for (let offset = 0; offset < rows.length; ) {
+          let end = offset, total = 0;
+          while (end < rows.length && end - offset < 100) {
+            const size = Buffer.byteLength(JSON.stringify(rows[end]), "utf8");
+            if (total + size > 8 * 1024 * 1024 && end > offset) break;
+            total += size;
+            end++;
+          }
+          const dbStart = Date.now();
+          const applied = await rpc("apply_corpus_collection_batch", {
+            p_run_id: runId,
+            p_checked_at: snapshot.checkedAt,
+            p_source_url: snapshot.sourceUrl,
+            p_rows: rows.slice(offset, end),
+            p_batch_index: batchIndex++
+          });
+          measure.dbMs += Date.now() - dbStart;
+          measure.batches++;
+          measure.written += applied?.written ?? 0;
+          measure.unchanged += applied?.unchanged ?? 0;
+          measure.bumped += applied?.bumped ?? 0;
+          offset = end;
         }
+        const finishStart = Date.now();
+        await rpc("finish_corpus_collection", {
+          p_run_id: runId,
+          p_expected_count: rows.length,
+          p_checked_at: snapshot.checkedAt,
+          p_source_url: snapshot.sourceUrl,
+          p_error_code: null
+        });
+        measure.dbMs += Date.now() - finishStart;
+        stats.completed++;
+        stats.postings += rows.length;
+        if ((stats.completed + stats.failed) % 250 === 0)
+          console.log(
+            `boards:${stats.completed + stats.failed}/${selected.length} postings:${stats.postings} failed:${stats.failed}`
+          );
+      } catch (error) {
+        stats.failed++;
+        const code = error instanceof CollectionError ? error.code : "COLLECTION_UNAVAILABLE";
+        measure.failures[code] = (measure.failures[code] ?? 0) + 1;
+        console.warn("Board collection failed", {
+          boardId: board.id,
+          source: board.ats,
+          code
+        });
+        if (started)
+          try {
+            await rpc("finish_corpus_collection", {
+              p_run_id: runId,
+              p_expected_count: null,
+              p_checked_at: null,
+              p_source_url: null,
+              p_error_code: code
+            });
+          } catch {
+            console.warn("Board failure could not be recorded", {
+              boardId: board.id
+            });
+          }
       }
-      await supabase.from("ats_companies").update({ last_polled_at: now, last_poll_status: "ok" }).eq("id", b.id);
-      if (stats.boards % 250 === 0) process.stdout.write(`\rboards:${stats.boards}/${boards.length} postings:${stats.postings} new:${newRows.length}`);
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-  console.log(`
-fetched \u2014 postings:${stats.postings} boardErrors:${stats.failed} new:${newRows.length}`);
-  const events = [];
-  for (let i = 0; i < newRows.length; i += 500) {
-    const chunk = newRows.slice(i, i + 500);
-    const { data, error } = await supabase.from("corpus_listings").upsert(chunk, { onConflict: "source,source_uid" }).select("id");
-    if (error) throw new Error(`insert @${i}: ${error.message}`);
-    for (const r of data ?? []) events.push({ listing_id: r.id, event: "new", meta: {} });
-    if (i % 5e3 === 0) process.stdout.write(`\rinsert: ${Math.min(i + 500, newRows.length)}/${newRows.length}`);
-  }
-  if (newRows.length) console.log();
-  for (let i = 0; i < bumpIds.length; i += 500) {
-    await supabase.from("corpus_listings").update({ last_seen_at: now, missed_polls: 0 }).in("id", bumpIds.slice(i, i + 500));
-  }
-  for (let i = 0; i < reopenIds.length; i += 500) {
-    const chunk = reopenIds.slice(i, i + 500);
-    await supabase.from("corpus_listings").update({ status: "reopened", last_seen_at: now, missed_polls: 0, closed_at: null }).in("id", chunk);
-    for (const id of chunk) events.push({ listing_id: id, event: "reopened", meta: {} });
-  }
-  const firstMiss = [];
-  const closing = [];
-  for (const [key, ex] of existing) {
-    if (seen.has(key) || ex.status === "closed") continue;
-    const board = key.split(":").slice(0, 2).join(":");
-    if (failedBoards.has(board)) continue;
-    if (nowMs - ex.lastSeen < CLOSE_STALE_MS) continue;
-    if (ex.missed + 1 >= 2) closing.push(ex.id);
-    else firstMiss.push(ex.id);
-  }
-  for (let i = 0; i < firstMiss.length; i += 500) {
-    await supabase.from("corpus_listings").update({ missed_polls: 1 }).in("id", firstMiss.slice(i, i + 500));
-  }
-  for (let i = 0; i < closing.length; i += 500) {
-    const chunk = closing.slice(i, i + 500);
-    await supabase.from("corpus_listings").update({ status: "closed", closed_at: now, missed_polls: 2 }).in("id", chunk);
-    for (const id of chunk) events.push({ listing_id: id, event: "closed", meta: {} });
-  }
-  for (let i = 0; i < events.length; i += 500) {
-    await supabase.from("corpus_events").insert(events.slice(i, i + 500));
-  }
-  console.log(`DONE \u2014 new:${newRows.length} bumped:${bumpIds.length} reopened:${reopenIds.length} firstMiss:${firstMiss.length} closed:${closing.length}`);
+  console.log("Collection complete", stats);
+  if (PILOT)
+    console.log(
+      "PILOT_SUMMARY " + JSON.stringify({
+        ...stats,
+        ...measure,
+        avgSourceBytes: stats.postings ? Math.round(measure.sourceBytes / stats.postings) : 0,
+        avgDescriptionChars: stats.postings ? Math.round(measure.descriptionChars / stats.postings) : 0
+      })
+    );
+  if (stats.failed) process.exitCode = 1;
 }
 async function verify() {
-  const companies = await pageAll(
-    "ats_companies",
-    "id, ats, board_token, tier"
-  );
+  const companies = await pageAll("ats_companies", "id, ats, board_token, board_url, tier");
   console.log(`verifying ${companies.length} boards\u2026`);
-  const counts = { active: 0, empty: 0, dead: 0 };
+  const counts = { active: 0, empty: 0, unknown: 0 };
   let done = 0;
   const queue = [...companies];
   const worker = async () => {
     for (; ; ) {
       const c = queue.shift();
       if (!c) return;
-      const status = await probe(c.ats, c.board_token);
+      const status = await probe(c.ats, c.board_token, c.board_url);
       counts[status]++;
-      await supabase.from("ats_companies").update({ verify_status: status, last_verified_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", c.id);
-      if (++done % 500 === 0) process.stdout.write(`\r${done}/${companies.length}`);
-    }
-  };
-  await Promise.all(Array.from({ length: 30 }, worker));
-  console.log(`
-DONE \u2014 active:${counts.active} empty:${counts.empty} dead:${counts.dead}`);
-}
-async function probe(ats, slug) {
-  const urls = {
-    greenhouse: `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
-    lever: `https://api.lever.co/v0/postings/${slug}?mode=json&limit=1`,
-    ashby: `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}`
-  };
-  const url = urls[ats];
-  if (!url) return "dead";
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 12e3);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: UA });
-    if (!res.ok) return "dead";
-    const reader = res.body?.getReader();
-    let head2 = "";
-    if (reader) {
-      while (head2.length < 400) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        head2 += new TextDecoder().decode(value);
+      if (status !== "unknown") {
+        const { error } = await supabase.from("ats_companies").update({
+          verify_status: status,
+          last_verified_at: (/* @__PURE__ */ new Date()).toISOString()
+        }).eq("id", c.id);
+        if (error) throw new CollectionError("VERIFY_WRITE_FAILED");
       }
-      ctrl.abort();
+      if (++done % 500 === 0)
+        process.stdout.write(`\r${done}/${companies.length}`);
     }
-    const c = head2.replace(/\s+/g, "");
-    if (ats === "lever") return c.startsWith("[{") ? "active" : c.startsWith("[]") ? "empty" : "dead";
-    if (c.includes('"jobs":[{')) return "active";
-    if (c.includes('"jobs":[]')) return "empty";
-    return c.startsWith('{"jobs":[') ? "active" : "dead";
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  console.log(
+    `
+DONE \u2014 active:${counts.active} empty:${counts.empty} unknown:${counts.unknown}`
+  );
+}
+async function probe(ats, slug, registryUrl) {
+  if (!["greenhouse", "lever", "ashby"].includes(ats)) return "unknown";
+  try {
+    const eu = ats === "lever" && Boolean(
+      registryUrl && new URL(registryUrl).hostname === "jobs.eu.lever.co"
+    );
+    const result = await fetchPrimaryBoard(ats, slug, fetch, eu);
+    return result.jobs.length ? "active" : "empty";
   } catch {
-    return "dead";
-  } finally {
-    clearTimeout(t);
+    return "unknown";
   }
 }
 var mode = process.argv[2];

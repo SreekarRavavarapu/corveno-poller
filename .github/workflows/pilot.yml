@@ -1,0 +1,42 @@
+name: Collector pilot
+# Bounded, manually dispatched run of the collector against a subset of boards.
+# Shares the `poll` concurrency group so it never runs alongside the scheduled
+# poll; the scheduled poll simply queues behind it.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximum number of boards to collect (0 = no limit)"
+        default: "200"
+        required: true
+      ats:
+        description: "Restrict to one ATS: greenhouse | lever | ashby | all"
+        default: "all"
+        required: true
+      tier:
+        description: "Restrict to a registry tier: intern-proven | harvested | all"
+        default: "all"
+        required: true
+
+concurrency:
+  group: poll
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Collect boards (bounded pilot)
+        run: node dist/run.cjs poll
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COLLECT_BOARD_LIMIT: ${{ inputs.limit }}
+          COLLECT_ATS: ${{ inputs.ats }}
+          COLLECT_TIER: ${{ inputs.tier }}
+          COLLECT_PILOT: "1"

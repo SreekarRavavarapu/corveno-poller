@@ -22578,7 +22578,13 @@ async function poll() {
         avgDescriptionChars: stats.postings ? Math.round(measure.descriptionChars / stats.postings) : 0
       })
     );
-  if (stats.failed) process.exitCode = 1;
+  const tolerated = Math.max(3, Math.floor(selected.length * 0.05));
+  if (stats.failed > tolerated) {
+    console.error(`Run failed: ${stats.failed} boards failed (tolerated ${tolerated})`);
+    process.exitCode = 1;
+  } else if (stats.failed) {
+    console.warn(`${stats.failed} board(s) failed and will be retried next cycle`);
+  }
 }
 async function verify() {
   const companies = await pageAll("ats_companies", "id, ats, board_token, board_url, tier");

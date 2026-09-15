@@ -507,7 +507,17 @@ async function poll() {
           avgDescriptionChars: stats.postings ? Math.round(measure.descriptionChars / stats.postings) : 0,
         }),
     );
-  if (stats.failed) process.exitCode = 1;
+  // Board-level failures are recorded per board (last_poll_status='error',
+  // consecutive_failures) and retried next cycle; the run itself fails only
+  // when more than a small share of boards failed, which signals a systemic
+  // problem (provider outage, database timeouts, schema mismatch).
+  const tolerated = Math.max(3, Math.floor(selected.length * 0.05));
+  if (stats.failed > tolerated) {
+    console.error(`Run failed: ${stats.failed} boards failed (tolerated ${tolerated})`);
+    process.exitCode = 1;
+  } else if (stats.failed) {
+    console.warn(`${stats.failed} board(s) failed and will be retried next cycle`);
+  }
 }
 
 /* ---------------- registry verify (weekly) ---------------- */

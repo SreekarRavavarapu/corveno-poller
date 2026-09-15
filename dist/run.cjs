@@ -25569,7 +25569,7 @@ async function seed() {
     );
     const rows = [];
     const restamp = [];
-    const restampBefore = Date.now() - 6 * 3600 * 1e3;
+    const restampBefore = Date.now() - 24 * 3600 * 1e3;
     let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
@@ -25607,8 +25607,8 @@ async function seed() {
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
-    for (let i = 0; i < restamp.length; i += 200) {
-      const { error } = await supabase.from("corpus_listings").update({ last_seen_at: checkedAt, source_checked_at: checkedAt }).in("id", restamp.slice(i, i + 200));
+    for (let i = 0; i < restamp.length; i += 100) {
+      const { error } = await supabase.from("corpus_listings").update({ last_seen_at: checkedAt, source_checked_at: checkedAt }).in("id", restamp.slice(i, i + 100));
       if (error) throw new Error(`${s.source} re-stamp @${i}: ${error.message}`);
     }
     console.log(

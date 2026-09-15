@@ -281,7 +281,10 @@ async function seed() {
     );
     const rows: Record<string, unknown>[] = [];
     const restamp: string[] = [];
-    const restampBefore = Date.now() - 6 * 3600 * 1000;
+    // Presence re-stamp of unchanged seed rows once a day: every re-stamp
+    // rewrites a wide corpus row plus its indexes, and 35k community-list rows
+    // at six-hour cadence saturated the small instance on September 15, 2026.
+    const restampBefore = Date.now() - 24 * 3600 * 1000;
     let unchanged = 0;
     for (const l of listings) {
       if (!l.id || !l.url || !l.company_name || !l.title) continue;
@@ -321,11 +324,11 @@ async function seed() {
       });
     }
     await upsertBatches("corpus_listings", rows, "source,source_uid", s.source);
-    for (let i = 0; i < restamp.length; i += 200) {
+    for (let i = 0; i < restamp.length; i += 100) {
       const { error } = await supabase
         .from("corpus_listings")
         .update({ last_seen_at: checkedAt, source_checked_at: checkedAt })
-        .in("id", restamp.slice(i, i + 200));
+        .in("id", restamp.slice(i, i + 100));
       if (error) throw new Error(`${s.source} re-stamp @${i}: ${error.message}`);
     }
     console.log(

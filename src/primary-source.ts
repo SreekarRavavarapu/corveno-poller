@@ -404,7 +404,7 @@ export function parseBoardResponse(
   ats: PrimaryAts,
   slug: string,
   data: unknown,
-): SourceJob[] {
+): SourceJob[] & { skippedMalformed?: number } {
   const wrapper = object(data),
     rows = ats === "lever" ? data : wrapper.jobs;
   if (!Array.isArray(rows)) throw new CollectionError("MALFORMED_BOARD");
@@ -424,10 +424,29 @@ export function parseBoardResponse(
     if (wrapper[key]) throw new CollectionError("UNEXPECTED_PAGINATION");
   }
   if (rows.length > 50000) throw new CollectionError("TOO_MANY_JOBS");
-  const jobs = rows.map((row) => normalizeJob(ats, slug, row));
+  // A record without a usable identity, title or URL is skipped (counted in
+  // `skippedMalformed`) rather than failing the whole board: it cannot be
+  // stored or applied to, and a previously stored version of it is treated as
+  // absent by the normal two-snapshot closure. Oversized records and
+  // structural board problems still fail the snapshot.
+  const jobs: SourceJob[] = [];
+  let skippedMalformed = 0;
+  for (const row of rows) {
+    try {
+      jobs.push(normalizeJob(ats, slug, row));
+    } catch (error) {
+      if (error instanceof CollectionError && (error.code === "MALFORMED_JOB" || error.code === "MALFORMED_JOB_URL")) skippedMalformed++;
+      else throw error;
+    }
+  }
+  // A board with no valid record, or with more than a handful of malformed
+  // ones (>5 and >10% of rows), is a structural problem: fail the snapshot
+  // rather than let an empty/partial capture close its listings.
+  if (skippedMalformed > 0 && (jobs.length === 0 || skippedMalformed > Math.max(5, Math.floor(rows.length * 0.1))))
+    throw new CollectionError("MALFORMED_JOB");
   if (new Set(jobs.map((j) => j.uid)).size !== jobs.length)
     throw new CollectionError("DUPLICATE_JOB_ID");
-  return jobs;
+  return Object.assign(jobs, { skippedMalformed });
 }
 export function boardUrl(ats: PrimaryAts, slug: string, eu = false): string {
   if (!/^[A-Za-z0-9_.-]{1,200}$/.test(slug))
@@ -520,15 +539,19 @@ export async function fetchPrimaryBoard(
   slug: string,
   fetcher: typeof fetch = fetch,
   eu = false,
-): Promise<{ jobs: SourceJob[]; checkedAt: string; sourceUrl: string }> {
+): Promise<{ jobs: SourceJob[]; checkedAt: string; sourceUrl: string; skippedMalformed: number }> {
   const url = boardUrl(ats, slug, eu),
     started = Date.now();
-  if (ats !== "lever")
+  if (ats !== "lever") {
+    const parsed = parseBoardResponse(ats, slug, await boundedJson(url, fetcher));
     return {
-      jobs: parseBoardResponse(ats, slug, await boundedJson(url, fetcher)),
+      jobs: parsed,
+      skippedMalformed: parsed.skippedMalformed ?? 0,
       checkedAt: new Date().toISOString(),
       sourceUrl: url,
     };
+  }
+  let skippedMalformed = 0;
   const jobs: SourceJob[] = [],
     ids = new Set<string>();
   let bytes = 0;
@@ -542,6 +565,7 @@ export async function fetchPrimaryBoard(
       Math.min(30000, 60000 - (Date.now() - started)),
     );
     const normalized = parseBoardResponse(ats, slug, page);
+    skippedMalformed += normalized.skippedMalformed ?? 0;
     if (normalized.length > 100)
       throw new CollectionError("PAGINATION_IGNORED");
     for (const job of normalized) {
@@ -552,7 +576,7 @@ export async function fetchPrimaryBoard(
       if (bytes > 25165824) throw new CollectionError("BOARD_TOO_LARGE");
     }
     if (normalized.length === 0)
-      return { jobs, checkedAt: new Date().toISOString(), sourceUrl: url };
+      return { jobs, checkedAt: new Date().toISOString(), sourceUrl: url, skippedMalformed };
     skip += normalized.length;
   }
   throw new CollectionError("TOO_MANY_JOBS");

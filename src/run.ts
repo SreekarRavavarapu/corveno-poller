@@ -315,6 +315,7 @@ async function poll() {
       withCountry: 0,
       batches: 0,
       splits: 0,
+      skippedMalformed: 0,
       written: 0,
       unchanged: 0,
       bumped: 0,
@@ -354,6 +355,10 @@ async function poll() {
           eu,
         );
         measure.fetchMs += Date.now() - fetchStart;
+        if (snapshot.skippedMalformed) {
+          measure.skippedMalformed += snapshot.skippedMalformed;
+          console.warn("Skipped malformed source records", { boardId: board.id, source: board.ats, count: snapshot.skippedMalformed });
+        }
         const rows = snapshot.jobs.map((job) => {
           // Source-stated employment type: the provider's structured field, or
           // an explicit statement in the title/description with its quote.

@@ -20,6 +20,7 @@ import {
   type PrimaryAts,
 } from "./primary-source";
 import { employmentTypeEvidence } from "./employment-evidence";
+import { gazetteerCountryEvidence, combineCountryEvidence } from "./location-gazetteer";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -313,6 +314,7 @@ async function poll() {
       typedFromStructured: 0,
       typedFromText: 0,
       withCountry: 0,
+      countryFromGazetteer: 0,
       batches: 0,
       splits: 0,
       skippedMalformed: 0,
@@ -373,9 +375,31 @@ async function poll() {
           const structured_job_type =
             job.structured_job_type ??
             (employment.conflict ? null : employment.type);
+          // Country: structured provider fields and explicit country labels
+          // (primary-source) first; otherwise the conservative seven-market
+          // gazetteer (unambiguous city/region names only, never a guess).
+          let country_codes = job.country_codes;
+          let country_evidence = job.country_evidence;
+          if (!country_codes.length && job.locations.length) {
+            const gazetteer = gazetteerCountryEvidence(job.locations.join(" ; "));
+            const combined = combineCountryEvidence(job.country_codes, gazetteer);
+            if (combined.length) {
+              country_codes = combined;
+              country_evidence = {
+                ...country_evidence,
+                gazetteer: gazetteer.matches,
+                gazetteer_ambiguous: gazetteer.ambiguous,
+                country_method: "gazetteer",
+              };
+            } else if (gazetteer.ambiguous.length || gazetteer.conflict) {
+              country_evidence = { ...country_evidence, gazetteer_ambiguous: gazetteer.ambiguous, gazetteer_conflict: gazetteer.conflict };
+            }
+          }
           const { source_record_json, ...withoutRaw } = job;
           return {
             ...(STORE_SNAPSHOTS ? job : withoutRaw),
+            country_codes,
+            country_evidence,
             structured_job_type,
             employment_evidence: employment.items,
             ...classify(job.title, structured_job_type, job.description),
@@ -394,6 +418,7 @@ async function poll() {
               else measure.typedFromText++;
             }
             if (row.country_codes.length) measure.withCountry++;
+            if (row.country_evidence.country_method === "gazetteer") measure.countryFromGazetteer++;
           }
         // Batches carry a 0-based sequential index. The database records the
         // applied indexes per run, so a retransmitted batch (timeout, retry)

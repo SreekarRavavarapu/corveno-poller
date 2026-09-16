@@ -5879,7 +5879,7 @@ var require_helpers = __commonJS({
     }
     function generatePKCEVerifier() {
       const verifierLength = 56;
-      const array = new Uint32Array(verifierLength);
+      const array2 = new Uint32Array(verifierLength);
       if (typeof crypto === "undefined") {
         const charSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
         const charSetLen = charSet.length;
@@ -5889,8 +5889,8 @@ var require_helpers = __commonJS({
         }
         return verifier;
       }
-      crypto.getRandomValues(array);
-      return Array.from(array, dec2hex).join("");
+      crypto.getRandomValues(array2);
+      return Array.from(array2, dec2hex).join("");
     }
     async function sha256(randomString) {
       const encoder = new TextEncoder();
@@ -12140,7 +12140,7 @@ var require_GoTrueClient = __commonJS({
        * const { error } = await supabase.auth.unlinkIdentity(googleIdentity)
        * ```
        */
-      async unlinkIdentity(identity) {
+      async unlinkIdentity(identity2) {
         try {
           return await this._useSession(async (result) => {
             var _a, _b;
@@ -12148,7 +12148,7 @@ var require_GoTrueClient = __commonJS({
             if (error) {
               throw error;
             }
-            return await (0, fetch_1._request)(this.fetch, "DELETE", `${this.url}/user/identities/${identity.identity_id}`, {
+            return await (0, fetch_1._request)(this.fetch, "DELETE", `${this.url}/user/identities/${identity2.identity_id}`, {
               headers: this.headers,
               jwt: (_b = (_a = data.session) === null || _a === void 0 ? void 0 : _a.access_token) !== null && _b !== void 0 ? _b : void 0
             });
@@ -21596,6 +21596,22 @@ var escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var names = [...aliases.entries()].map(([name, country]) => ({ country, pattern: new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escape(name)}(?![\\p{L}\\p{M}\\p{N}])`, "giu"), name }));
 
 // src/primary-source.ts
+var PRIMARY_ATS = [
+  "greenhouse",
+  "lever",
+  "ashby",
+  "recruitee",
+  "workable",
+  "breezy",
+  "pinpoint",
+  "teamtailor",
+  "usajobs"
+];
+var isPrimaryAts = (value) => typeof value === "string" && PRIMARY_ATS.includes(value);
+function usajobsCredentials(env = typeof process === "undefined" ? void 0 : process.env) {
+  const apiKey = env?.USAJOBS_API_KEY?.trim(), userAgent = env?.USAJOBS_USER_AGENT?.trim();
+  return apiKey && userAgent ? { apiKey, userAgent } : null;
+}
 var CollectionError = class extends Error {
   constructor(code) {
     super(code);
@@ -21603,6 +21619,7 @@ var CollectionError = class extends Error {
   }
 };
 var object = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+var array = (v) => Array.isArray(v) ? v : [];
 var iso3 = {
   USA: "US",
   CAN: "CA",
@@ -21711,16 +21728,16 @@ function decodeEntities(raw) {
   );
 }
 function plainText(raw) {
-  let html = raw;
+  let html2 = raw;
   const structure = "(?:html|body|p|div|span|ul|ol|li|h[1-6]|br|section|article|table|strong|em)";
   const literalMarkup = new RegExp(`<\\/?${structure}\\b`, "i");
   const escapedMarkup = new RegExp(
     `&(?:amp;)?lt;\\/?${structure}(?:&|\\s|>)`,
     "i"
   );
-  for (let depth = 0; depth < 2 && !literalMarkup.test(html) && escapedMarkup.test(html); depth++)
-    html = decodeEntities(html);
-  const stripped = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<\s*(?:br\b[^>]*|\/(?:p|div|li|h[1-6]))\s*\/?>/gi, "\n").replace(
+  for (let depth = 0; depth < 2 && !literalMarkup.test(html2) && escapedMarkup.test(html2); depth++)
+    html2 = decodeEntities(html2);
+  const stripped = html2.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, "").replace(/<\s*(?:br\b[^>]*|\/(?:p|div|li|h[1-6]))\s*\/?>/gi, "\n").replace(
     /<\/?(?:html|body|head|title|meta|link|a|abbr|address|article|aside|b|blockquote|button|caption|code|col|dd|del|details|div|dl|dt|em|fieldset|figcaption|figure|font|footer|form|h[1-6]|header|hr|i|iframe|img|input|label|legend|li|main|nav|ol|option|p|pre|s|section|select|small|span|strong|sub|summary|sup|table|tbody|td|textarea|th|thead|time|tr|u|ul)\b[^>]*>/gi,
     " "
   );
@@ -21734,10 +21751,24 @@ function stable(value) {
 function text(v) {
   return typeof v === "string" ? v : null;
 }
+function label(v) {
+  return typeof v === "string" && v.trim() ? v : null;
+}
+function html(v) {
+  return label(v) ? plainText(v) : null;
+}
 function date(v) {
   if (v === null || v === void 0) return null;
   const time = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+function unzonedDate(v) {
+  return date(
+    typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(v.trim()) ? `${v.trim()}Z` : v
+  );
+}
+function identity(v) {
+  return typeof v === "string" ? v : typeof v === "number" && Number.isSafeInteger(v) ? String(v) : null;
 }
 function employmentType(value) {
   if (typeof value !== "string") return null;
@@ -21746,34 +21777,269 @@ function employmentType(value) {
     parttime: "part_time",
     intern: "internship",
     internship: "internship",
+    internships: "internship",
     contract: "contract",
     contractor: "contract",
     temporary: "temporary",
     coop: "co_op",
     apprenticeship: "apprenticeship",
-    research: "research"
+    research: "research",
+    // Compound provider codes (Recruitee `employment_type_code`) and
+    // labels used by the feeds authorised 2026-09-16. Fixed-term work is
+    // a contract, seasonal/temp work is temporary, freelance is contract —
+    // the same reading as employmentTypeFromLabel in employment-evidence.
+    fulltimepermanent: "full_time",
+    parttimepermanent: "part_time",
+    fulltimefixedterm: "contract",
+    parttimefixedterm: "contract",
+    fulltimetemporary: "temporary",
+    parttimetemporary: "temporary",
+    fixedterm: "contract",
+    freelance: "contract",
+    temp: "temporary",
+    seasonal: "temporary"
   }[value.toLowerCase().replace(/[\s_-]/g, "")] ?? null;
 }
 function worldwideEvidence(fields, job) {
   const workplace = typeof job.workplaceType === "string" ? job.workplaceType.trim().toLowerCase() : null;
-  if (job.isRemote === false || workplace === "onsite" || workplace === "on-site" || workplace === "hybrid") return null;
+  if (job.isRemote === false || workplace === "onsite" || workplace === "on-site" || workplace === "on_site" || workplace === "hybrid") return null;
   const remote = workplace === "remote" ? { path: "workplaceType", value: job.workplaceType } : job.isRemote === true ? { path: "isRemote", value: true } : null;
   const scope = "(?:worldwide|anywhere in the world)";
   const combined = new RegExp(`^(?:remote\\s*(?:[-\u2013\u2014|:,/]\\s*)?${scope}|remote\\s*\\(\\s*${scope}\\s*\\)|${scope}\\s*(?:[-\u2013\u2014|:,/]\\s*)?remote)$`, "i");
   for (const field of fields) {
     if (typeof field.raw !== "string") continue;
-    const label = field.raw.trim().replace(/\s+/g, " ");
-    if (combined.test(label) || remote && new RegExp(`^${scope}$`, "i").test(label))
+    const label2 = field.raw.trim().replace(/\s+/g, " ");
+    if (combined.test(label2) || remote && new RegExp(`^${scope}$`, "i").test(label2))
       return { fieldPath: field.path, quote: field.raw, ...remote ? { remoteEvidence: remote } : {} };
   }
   return null;
 }
+function sections(parts) {
+  const out = [];
+  for (const part of parts) {
+    if (part === null) continue;
+    if (typeof part === "string") {
+      if (part.trim()) out.push(part);
+      continue;
+    }
+    if (!part.body?.trim()) continue;
+    out.push(part.heading?.trim() ? `${part.heading.trim()}
+${part.body}` : part.body);
+  }
+  return out.join("\n\n") || null;
+}
+function joined(...parts) {
+  const labels = parts.map(label).filter((v) => v !== null);
+  return [...new Set(labels.map((v) => v.trim()))].join(", ") || null;
+}
+function extract(ats, j) {
+  const cats = object(j.categories);
+  const base = {
+    uid: identity(j.id),
+    title: text(j.title),
+    url: null,
+    description: null,
+    locationFields: [],
+    countryFields: [],
+    structuredType: null,
+    posted_at: null,
+    updated_at: date(j.updated_at),
+    listed: true,
+    remote: { workplaceType: j.workplaceType, isRemote: j.isRemote }
+  };
+  switch (ats) {
+    case "greenhouse":
+      return {
+        ...base,
+        url: text(j.absolute_url),
+        description: text(j.content) !== null ? plainText(j.content) : null,
+        locationFields: [{ path: "location.name", raw: object(j.location).name }],
+        posted_at: date(j.first_published)
+      };
+    case "lever": {
+      if (j.lists !== void 0 && (!Array.isArray(j.lists) || j.lists.some(
+        (item) => typeof object(item).content !== "string"
+      )))
+        throw new CollectionError("MALFORMED_DESCRIPTION_LISTS");
+      const body = text(j.descriptionPlain) ?? (text(j.description) ? plainText(j.description) : null);
+      const lists = (j.lists ?? []).map(
+        (item) => [text(item.text), plainText(item.content)].filter(Boolean).join("\n")
+      );
+      const additional = text(j.additionalPlain) ?? (text(j.additional) ? plainText(j.additional) : null);
+      return {
+        ...base,
+        title: text(j.text),
+        url: text(j.hostedUrl),
+        description: [body, ...lists, additional].filter(Boolean).join("\n\n") || null,
+        locationFields: [
+          { path: "categories.location", raw: cats.location },
+          ...array(cats.allLocations).map((raw, i) => ({ path: `categories.allLocations[${i}]`, raw }))
+        ],
+        countryFields: [{ path: "country", raw: j.country }],
+        structuredType: text(cats.commitment),
+        posted_at: date(j.createdAt)
+      };
+    }
+    case "ashby":
+      if (j.isListed !== void 0 && typeof j.isListed !== "boolean")
+        throw new CollectionError("MALFORMED_VISIBILITY");
+      return {
+        ...base,
+        url: text(j.jobUrl ?? j.applyUrl),
+        description: text(j.descriptionHtml) ? plainText(j.descriptionHtml) : text(j.descriptionPlain),
+        locationFields: [
+          { path: "location", raw: j.location },
+          ...array(j.secondaryLocations).map((location2, i) => ({ path: `secondaryLocations[${i}].location`, raw: object(location2).location }))
+        ],
+        countryFields: [
+          {
+            path: "address.postalAddress.addressCountry",
+            raw: object(object(j.address).postalAddress).addressCountry
+          },
+          ...array(j.secondaryLocations).map((l, i) => ({
+            path: `secondaryLocations[${i}].address.addressCountry`,
+            raw: object(object(l).address).addressCountry
+          }))
+        ],
+        structuredType: text(j.employmentType),
+        posted_at: date(j.publishedAt),
+        listed: j.isListed !== false
+      };
+    case "recruitee": {
+      const locations = array(j.locations).map(object);
+      return {
+        ...base,
+        url: text(j.careers_url) ?? text(j.careers_apply_url),
+        description: sections([html(j.description), html(j.requirements)]),
+        locationFields: [
+          { path: "location", raw: j.location },
+          ...locations.map((l, i) => ({ path: `locations[${i}]`, raw: joined(l.city ?? l.name, l.country) }))
+        ],
+        countryFields: [
+          { path: "country_code", raw: j.country_code },
+          ...locations.map((l, i) => ({ path: `locations[${i}].country_code`, raw: l.country_code }))
+        ],
+        structuredType: label(j.employment_type_code),
+        posted_at: date(j.published_at),
+        remote: { isRemote: typeof j.remote === "boolean" ? j.remote : void 0 }
+      };
+    }
+    case "workable": {
+      const locations = array(j.locations).map(object).filter((l) => l.hidden !== true);
+      return {
+        ...base,
+        uid: identity(j.shortcode),
+        url: text(j.url) ?? text(j.shortlink) ?? text(j.application_url),
+        description: html(j.description),
+        locationFields: locations.length ? locations.map((l, i) => ({ path: `locations[${i}]`, raw: joined(l.city, l.region, l.country) })) : [{ path: "location", raw: joined(j.city, j.state, j.country) }],
+        countryFields: [
+          { path: "country", raw: label(j.country) },
+          ...locations.map((l, i) => ({ path: `locations[${i}].countryCode`, raw: l.countryCode }))
+        ],
+        structuredType: label(j.employment_type),
+        posted_at: date(label(j.published_on)),
+        updated_at: null,
+        remote: { isRemote: typeof j.telecommuting === "boolean" ? j.telecommuting : void 0 }
+      };
+    }
+    case "breezy": {
+      const primary = object(j.location);
+      const locations = array(j.locations).map(object);
+      const countryOf = (l) => object(l.country).id ?? object(l.country).name ?? l.country;
+      return {
+        ...base,
+        title: text(j.name),
+        url: text(j.url),
+        description: html(j.position_page_description),
+        locationFields: [
+          { path: "location.name", raw: primary.name },
+          ...locations.map((l, i) => ({ path: `locations[${i}].name`, raw: l.name }))
+        ],
+        countryFields: [
+          { path: "location.country", raw: countryOf(primary) },
+          ...locations.map((l, i) => ({ path: `locations[${i}].country`, raw: countryOf(l) }))
+        ],
+        structuredType: label(object(j.type).name) ?? label(object(j.type).id),
+        posted_at: date(j.published_date),
+        updated_at: null,
+        remote: { isRemote: typeof primary.is_remote === "boolean" ? primary.is_remote : void 0 }
+      };
+    }
+    case "pinpoint": {
+      const loc = object(j.location);
+      const countryName = label(loc.name) && explicitCountry(loc.name) ? loc.name : null;
+      return {
+        ...base,
+        url: text(j.url),
+        description: sections([
+          html(j.description),
+          { heading: label(j.key_responsibilities_header), body: html(j.key_responsibilities) },
+          { heading: label(j.skills_knowledge_expertise_header), body: html(j.skills_knowledge_expertise) },
+          { heading: label(j.benefits_header), body: html(j.benefits) }
+        ]),
+        locationFields: [
+          { path: "location.name", raw: loc.name },
+          { path: "location.city", raw: joined(loc.city, loc.province) }
+        ],
+        countryFields: [
+          { path: "location.country_code", raw: loc.country_code ?? loc.country },
+          { path: "location.name", raw: countryName }
+        ],
+        structuredType: label(j.employment_type) ?? label(j.employment_type_text),
+        posted_at: date(label(j.published_at)),
+        updated_at: null,
+        remote: { workplaceType: j.workplace_type }
+      };
+    }
+    case "teamtailor": {
+      const posting = object(j._jobposting);
+      const places = (Array.isArray(posting.jobLocation) ? posting.jobLocation : posting.jobLocation ? [posting.jobLocation] : []).map(object);
+      return {
+        ...base,
+        url: text(j.url),
+        description: html(j.content_html) ?? html(posting.description),
+        locationFields: places.map((p, i) => ({ path: `_jobposting.jobLocation[${i}].address.addressLocality`, raw: object(p.address).addressLocality })),
+        countryFields: places.map((p, i) => ({ path: `_jobposting.jobLocation[${i}].address.addressCountry`, raw: object(p.address).addressCountry })),
+        structuredType: label(posting.employmentType),
+        posted_at: date(j.date_published) ?? date(posting.datePosted),
+        updated_at: date(j.date_modified),
+        remote: { isRemote: posting.jobLocationType === "TELECOMMUTE" ? true : void 0 }
+      };
+    }
+    case "usajobs": {
+      const d = object(j.MatchedObjectDescriptor), details = object(object(d.UserArea).Details);
+      const locations = array(d.PositionLocation).map(object);
+      const typeLabels = [...array(d.PositionOfferingType), ...array(d.PositionSchedule)].map((t) => label(object(t).Name)).filter((v) => v !== null);
+      return {
+        ...base,
+        uid: identity(j.MatchedObjectId),
+        title: text(d.PositionTitle),
+        url: text(d.PositionURI) ?? text(array(d.ApplyURI)[0]),
+        description: sections([
+          html(details.JobSummary),
+          { heading: "Duties", body: sections(array(details.MajorDuties).map(html)) },
+          { heading: "Requirements", body: html(details.Requirements) },
+          { heading: "Qualifications", body: html(d.QualificationSummary) },
+          { heading: "Education", body: html(details.Education) },
+          { heading: "How to apply", body: html(details.HowToApply) }
+        ]),
+        locationFields: [
+          { path: "PositionLocationDisplay", raw: d.PositionLocationDisplay },
+          ...locations.map((l, i) => ({ path: `PositionLocation[${i}].LocationName`, raw: l.LocationName }))
+        ],
+        countryFields: locations.map((l, i) => ({ path: `PositionLocation[${i}].CountryCode`, raw: l.CountryCode })),
+        structuredType: typeLabels.find((v) => employmentType(v)) ?? typeLabels[0] ?? null,
+        posted_at: unzonedDate(d.PublicationStartDate),
+        updated_at: null,
+        remote: { isRemote: details.RemoteIndicator === true ? true : void 0 }
+      };
+    }
+  }
+}
 function normalizeJob(ats, slug, raw) {
-  const j = object(raw), cats = object(j.categories), issues = [];
-  const uid = typeof j.id === "string" ? j.id : typeof j.id === "number" && Number.isSafeInteger(j.id) ? String(j.id) : null;
-  const title = text(ats === "lever" ? j.text : j.title), url = text(
-    ats === "greenhouse" ? j.absolute_url : ats === "lever" ? j.hostedUrl : j.jobUrl ?? j.applyUrl
-  );
+  const j = object(raw), issues = [];
+  const x = extract(ats, j);
+  const { uid, title, url } = x;
   if (!uid || !title?.trim() || !url || uid.length > 200 || title.length > 2e3 || url.length > 8192)
     throw new CollectionError("MALFORMED_JOB");
   try {
@@ -21786,62 +22052,29 @@ function normalizeJob(ats, slug, raw) {
   const rawJson = JSON.stringify(stable(j));
   if (Buffer.byteLength(rawJson, "utf8") > 1048576)
     throw new CollectionError("JOB_TOO_LARGE");
-  let description = null;
-  if (ats === "greenhouse")
-    description = text(j.content) !== null ? plainText(j.content) : null;
-  if (ats === "ashby")
-    description = text(j.descriptionHtml) ? plainText(j.descriptionHtml) : text(j.descriptionPlain);
-  if (ats === "lever") {
-    if (j.lists !== void 0 && (!Array.isArray(j.lists) || j.lists.some(
-      (item) => typeof object(item).content !== "string"
-    )))
-      throw new CollectionError("MALFORMED_DESCRIPTION_LISTS");
-    const body = text(j.descriptionPlain) ?? (text(j.description) ? plainText(j.description) : null);
-    const lists = (j.lists ?? []).map(
-      (item) => [text(item.text), plainText(item.content)].filter(Boolean).join("\n")
-    );
-    const additional = text(j.additionalPlain) ?? (text(j.additional) ? plainText(j.additional) : null);
-    description = [body, ...lists, additional].filter(Boolean).join("\n\n") || null;
-  }
+  let description = x.description;
   const originalDescription = description;
   if (description?.includes("\0")) {
     description = description.replaceAll("\0", "");
     issues.push("description:nul-removed-in-readable-copy-original-retained");
   }
-  const locationFields = ats === "greenhouse" ? [{ path: "location.name", raw: object(j.location).name }] : ats === "lever" ? [
-    { path: "categories.location", raw: cats.location },
-    ...Array.isArray(cats.allLocations) ? cats.allLocations.map((raw2, i) => ({ path: `categories.allLocations[${i}]`, raw: raw2 })) : []
-  ] : [
-    { path: "location", raw: j.location },
-    ...Array.isArray(j.secondaryLocations) ? j.secondaryLocations.map((location2, i) => ({ path: `secondaryLocations[${i}].location`, raw: object(location2).location })) : []
-  ];
-  const locations = locationFields.map((field) => field.raw);
-  const countryFields = ats === "lever" ? [{ path: "country", raw: j.country }] : ats === "ashby" ? [
-    {
-      path: "address.postalAddress.addressCountry",
-      raw: object(object(j.address).postalAddress).addressCountry
-    },
-    ...Array.isArray(j.secondaryLocations) ? j.secondaryLocations.map((l, i) => ({
-      path: `secondaryLocations[${i}].address.addressCountry`,
-      raw: object(object(l).address).addressCountry
-    })) : []
-  ] : [];
-  const evidence = countryFields.filter(
+  const locations = x.locationFields.map((field) => field.raw);
+  const evidence = x.countryFields.filter(
     (f) => f.raw !== null && f.raw !== void 0
-  ), countries = [
+  );
+  let countries = [
     ...new Set(
       evidence.map((f) => explicitCountry(f.raw)).filter((v) => v !== null)
     )
   ];
   for (const f of evidence)
     if (!explicitCountry(f.raw)) issues.push(`country:unrecognized:${f.path}`);
-  const worldwide = worldwideEvidence([...locationFields, ...countryFields], j);
-  const structuredType = text(
-    ats === "lever" ? cats.commitment : ats === "ashby" ? j.employmentType : null
-  );
-  const listed = ats !== "ashby" || j.isListed !== false;
-  if (ats === "ashby" && j.isListed !== void 0 && typeof j.isListed !== "boolean")
-    throw new CollectionError("MALFORMED_VISIBILITY");
+  let countryMethod = {};
+  if (ats === "usajobs" && !countries.length) {
+    countries = ["US"];
+    countryMethod = { country_method: "source-default", default_country: "US" };
+  }
+  const worldwide = worldwideEvidence([...x.locationFields, ...x.countryFields], x.remote);
   return {
     uid,
     title,
@@ -21853,12 +22086,10 @@ function normalizeJob(ats, slug, raw) {
         )
       )
     ],
-    posted_at: date(
-      ats === "lever" ? j.createdAt : ats === "ashby" ? j.publishedAt : j.first_published
-    ),
-    updated_at: date(j.updated_at),
-    structuredType,
-    structured_job_type: employmentType(structuredType),
+    posted_at: x.posted_at,
+    updated_at: x.updated_at,
+    structuredType: x.structuredType,
+    structured_job_type: employmentType(x.structuredType),
     description,
     description_complete: Boolean(originalDescription?.trim()) && description === originalDescription,
     country_codes: countries,
@@ -21866,16 +22097,35 @@ function normalizeJob(ats, slug, raw) {
       source: `${ats}-api`,
       fieldPaths: evidence.map((f) => f.path),
       rawValues: evidence.map((f) => f.raw),
+      ...countryMethod,
       ...worldwide ? { remote_scope: "worldwide", worldwide_evidence: worldwide } : {}
     },
-    is_publicly_listed: listed,
+    is_publicly_listed: x.listed,
     source_record_json: rawJson,
     source_content_sha256: (0, import_node_crypto.createHash)("sha256").update(rawJson).digest("hex"),
     issues
   };
 }
+function boardRows(ats, data) {
+  const wrapper = object(data);
+  switch (ats) {
+    case "lever":
+    case "breezy":
+      return data;
+    case "recruitee":
+      return wrapper.offers;
+    case "pinpoint":
+      return wrapper.data;
+    case "teamtailor":
+      return wrapper.items;
+    case "usajobs":
+      return object(wrapper.SearchResult).SearchResultItems;
+    default:
+      return wrapper.jobs;
+  }
+}
 function parseBoardResponse(ats, slug, data) {
-  const wrapper = object(data), rows = ats === "lever" ? data : wrapper.jobs;
+  const wrapper = object(data), rows = boardRows(ats, data);
   if (!Array.isArray(rows)) throw new CollectionError("MALFORMED_BOARD");
   if (ats === "greenhouse" && (!Number.isSafeInteger(object(wrapper.meta).total) || object(wrapper.meta).total !== rows.length))
     throw new CollectionError("INCOMPLETE_BOARD");
@@ -21884,7 +22134,8 @@ function parseBoardResponse(ats, slug, data) {
     "nextPage",
     "nextCursor",
     "hasMore",
-    "hasNextPage"
+    "hasNextPage",
+    "next_url"
   ]) {
     if (wrapper[key]) throw new CollectionError("UNEXPECTED_PAGINATION");
   }
@@ -21905,11 +22156,30 @@ function parseBoardResponse(ats, slug, data) {
     throw new CollectionError("DUPLICATE_JOB_ID");
   return Object.assign(jobs, { skippedMalformed });
 }
+var dnsLabel = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+var hostName = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 function boardUrl(ats, slug, eu = false) {
   if (!/^[A-Za-z0-9_.-]{1,200}$/.test(slug))
     throw new CollectionError("INVALID_BOARD");
   const board = encodeURIComponent(slug);
-  return ats === "greenhouse" ? `https://boards-api.greenhouse.io/v1/boards/${board}/jobs?content=true` : ats === "lever" ? `https://api.${eu ? "eu." : ""}lever.co/v0/postings/${board}?mode=json` : `https://api.ashbyhq.com/posting-api/job-board/${board}`;
+  switch (ats) {
+    case "greenhouse":
+      return `https://boards-api.greenhouse.io/v1/boards/${board}/jobs?content=true`;
+    case "lever":
+      return `https://api.${eu ? "eu." : ""}lever.co/v0/postings/${board}?mode=json`;
+    case "ashby":
+      return `https://api.ashbyhq.com/posting-api/job-board/${board}`;
+    case "workable":
+      return `https://apply.workable.com/api/v1/widget/accounts/${board}?details=true`;
+    case "usajobs":
+      return `https://data.usajobs.gov/api/Search?ResultsPerPage=500&Fields=Full${slug.toLowerCase() === "all" ? "" : `&Organization=${board}`}`;
+    case "teamtailor":
+      if (!hostName.test(slug)) throw new CollectionError("INVALID_BOARD");
+      return `https://${slug.toLowerCase()}/jobs.json`;
+    default:
+      if (!dnsLabel.test(slug)) throw new CollectionError("INVALID_BOARD");
+      return ats === "recruitee" ? `https://${slug.toLowerCase()}.recruitee.com/api/offers/` : ats === "breezy" ? `https://${slug.toLowerCase()}.breezy.hr/json` : `https://${slug.toLowerCase()}.pinpointhq.com/postings.json`;
+  }
 }
 async function abortable(pending, signal) {
   if (signal.aborted) throw new CollectionError("BODY_TIMEOUT");
@@ -21925,7 +22195,7 @@ async function abortable(pending, signal) {
     signal.removeEventListener("abort", abort);
   }
 }
-async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs = 3e4, allowPlainJson = false) {
+async function boundedBody(url, fetcher, maxBytes, timeoutMs, expect, headers = {}) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await abortable(
@@ -21934,7 +22204,8 @@ async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs 
         redirect: "error",
         headers: {
           "User-Agent": "Corveno corpus (hello@corveno.io)",
-          Accept: "application/json"
+          Accept: expect.accept,
+          ...headers
         }
       }),
       controller.signal
@@ -21942,8 +22213,8 @@ async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs 
     if (!response.ok) throw new CollectionError(`HTTP_${response.status}`);
     if (response.status === 206 || response.headers.has("content-range"))
       throw new CollectionError("PARTIAL_RESPONSE");
-    if (!/\bjson\b/i.test(response.headers.get("content-type") ?? "") && !(allowPlainJson && /^text\/plain\b/i.test(response.headers.get("content-type") ?? "")))
-      throw new CollectionError("NOT_JSON");
+    if (!expect.contentType(response.headers.get("content-type") ?? ""))
+      throw new CollectionError(expect.failure);
     if (Number(response.headers.get("content-length")) > maxBytes)
       throw new CollectionError("BODY_TOO_LARGE");
     const reader = response.body?.getReader();
@@ -21962,50 +22233,155 @@ async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs 
       void reader.cancel().catch(() => {
       });
     }
-    try {
-      return JSON.parse(
-        new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
-      );
-    } catch {
-      throw new CollectionError("INVALID_JSON");
-    }
+    return Buffer.concat(chunks);
   } finally {
     clearTimeout(timer);
   }
 }
-async function fetchPrimaryBoard(ats, slug, fetcher = fetch, eu = false) {
-  const url = boardUrl(ats, slug, eu), started = Date.now();
-  if (ats !== "lever") {
-    const parsed = parseBoardResponse(ats, slug, await boundedJson(url, fetcher));
-    return {
-      jobs: parsed,
-      skippedMalformed: parsed.skippedMalformed ?? 0,
-      checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      sourceUrl: url
-    };
+async function boundedJson(url, fetcher = fetch, maxBytes = 25165824, timeoutMs = 3e4, allowPlainJson = false, headers = {}) {
+  const body = await boundedBody(
+    url,
+    fetcher,
+    maxBytes,
+    timeoutMs,
+    {
+      accept: "application/json",
+      contentType: (type) => /\bjson\b/i.test(type) || allowPlainJson && /^text\/plain\b/i.test(type),
+      failure: "NOT_JSON"
+    },
+    headers
+  );
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    throw new CollectionError("INVALID_JSON");
   }
+}
+async function boundedHtml(url, fetcher = fetch, maxBytes = 1048576, timeoutMs = 3e4) {
+  const body = await boundedBody(url, fetcher, maxBytes, timeoutMs, {
+    accept: "text/html",
+    contentType: (type) => /^text\/html\b/i.test(type),
+    failure: "NOT_HTML"
+  });
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    throw new CollectionError("INVALID_ENCODING");
+  }
+}
+function breezyPageDescription(page) {
+  const open = /<div\b[^>]*\bclass=["'](?:[^"']*\s)?description(?:\s[^"']*)?["'][^>]*>/i.exec(page);
+  if (!open) return null;
+  const start = open.index + open[0].length;
+  const tag = /<\/?div\b[^>]*>/gi;
+  tag.lastIndex = start;
+  for (let depth = 1, m = tag.exec(page); m; m = tag.exec(page)) {
+    depth += m[0][1] === "/" ? -1 : 1;
+    if (depth === 0) return page.slice(start, m.index);
+  }
+  return null;
+}
+var BREEZY_MAX_POSITIONS = 200;
+var BREEZY_MAX_PAGE_BYTES = 1048576;
+var BREEZY_MAX_BOARD_BYTES = 16777216;
+var BREEZY_BOARD_TIMEOUT_MS = 12e4;
+var BREEZY_CONCURRENCY = 4;
+async function breezyWithDescriptions(slug, rows, fetcher, started) {
+  if (rows.length > BREEZY_MAX_POSITIONS) throw new CollectionError("TOO_MANY_JOBS");
+  const host = `${slug.toLowerCase()}.breezy.hr`;
+  const out = new Array(rows.length);
+  let bytes = 0, next = 0;
+  const worker = async () => {
+    for (; ; ) {
+      const index = next++;
+      if (index >= rows.length) return;
+      const row = object(rows[index]);
+      let pageUrl = null;
+      try {
+        pageUrl = new URL(String(row.url));
+      } catch {
+        pageUrl = null;
+      }
+      if (!pageUrl || pageUrl.protocol !== "https:" || pageUrl.host !== host) {
+        out[index] = rows[index];
+        continue;
+      }
+      const remaining = BREEZY_BOARD_TIMEOUT_MS - (Date.now() - started);
+      if (remaining <= 0) throw new CollectionError("BOARD_TIMEOUT");
+      let page = null;
+      try {
+        page = await boundedHtml(pageUrl.href, fetcher, BREEZY_MAX_PAGE_BYTES, Math.min(3e4, remaining));
+      } catch (error) {
+        if (!(error instanceof CollectionError && (error.code === "HTTP_404" || error.code === "HTTP_410"))) throw error;
+      }
+      if (page !== null) {
+        bytes += Buffer.byteLength(page, "utf8");
+        if (bytes > BREEZY_MAX_BOARD_BYTES) throw new CollectionError("BOARD_TOO_LARGE");
+      }
+      out[index] = { ...row, position_page_description: page === null ? null : breezyPageDescription(page) };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(BREEZY_CONCURRENCY, rows.length) }, worker));
+  return out;
+}
+var USAJOBS_PAGE_ROWS = 500;
+var USAJOBS_MAX_ROWS = 1e4;
+var USAJOBS_MAX_BOARD_BYTES = 134217728;
+var USAJOBS_BOARD_TIMEOUT_MS = 3e5;
+async function fetchPrimaryBoard(ats, slug, fetcher = fetch, eu = false, credentials = null) {
+  const url = boardUrl(ats, slug, eu), started = Date.now();
+  const snapshot = (parsed) => ({
+    jobs: parsed,
+    skippedMalformed: parsed.skippedMalformed ?? 0,
+    checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    sourceUrl: url
+  });
+  if (ats === "breezy") {
+    const list = await boundedJson(url, fetcher);
+    if (!Array.isArray(list)) throw new CollectionError("MALFORMED_BOARD");
+    return snapshot(parseBoardResponse(ats, slug, await breezyWithDescriptions(slug, list, fetcher, started)));
+  }
+  if (ats !== "lever" && ats !== "usajobs")
+    return snapshot(parseBoardResponse(ats, slug, await boundedJson(url, fetcher)));
+  const usajobs = ats === "usajobs" ? credentials ?? usajobsCredentials() : null;
+  if (ats === "usajobs" && !usajobs) throw new CollectionError("USAJOBS_CREDENTIALS_MISSING");
+  const headers = usajobs ? { Host: "data.usajobs.gov", "User-Agent": usajobs.userAgent, "Authorization-Key": usajobs.apiKey } : {};
+  const deadline = ats === "usajobs" ? USAJOBS_BOARD_TIMEOUT_MS : 6e4, maxBytes = ats === "usajobs" ? USAJOBS_MAX_BOARD_BYTES : 25165824;
   let skippedMalformed = 0;
   const jobs = [], ids = /* @__PURE__ */ new Set();
   let bytes = 0;
-  for (let skip = 0; skip <= 5e4; ) {
-    if (Date.now() - started > 6e4)
+  for (let skip = 0, page = 1; skip <= 5e4; page++) {
+    if (Date.now() - started > deadline)
       throw new CollectionError("BOARD_TIMEOUT");
-    const page = await boundedJson(
-      `${url}&limit=100&skip=${skip}`,
+    const pageUrl = ats === "usajobs" ? `${url}&Page=${page}` : `${url}&limit=100&skip=${skip}`;
+    const body = await boundedJson(
+      pageUrl,
       fetcher,
-      8388608,
-      Math.min(3e4, 6e4 - (Date.now() - started))
+      ats === "usajobs" ? 25165824 : 8388608,
+      Math.min(3e4, deadline - (Date.now() - started)),
+      false,
+      headers
     );
-    const normalized2 = parseBoardResponse(ats, slug, page);
+    const normalized2 = parseBoardResponse(ats, slug, body);
     skippedMalformed += normalized2.skippedMalformed ?? 0;
-    if (normalized2.length > 100)
+    if (normalized2.length > (ats === "usajobs" ? USAJOBS_PAGE_ROWS : 100))
       throw new CollectionError("PAGINATION_IGNORED");
     for (const job of normalized2) {
       if (ids.has(job.uid)) throw new CollectionError("UNSTABLE_PAGINATION");
       ids.add(job.uid);
       jobs.push(job);
       bytes += Buffer.byteLength(job.source_record_json);
-      if (bytes > 25165824) throw new CollectionError("BOARD_TOO_LARGE");
+      if (bytes > maxBytes) throw new CollectionError("BOARD_TOO_LARGE");
+    }
+    if (ats === "usajobs") {
+      const result = object(object(body).SearchResult);
+      const total = Number(result.SearchResultCountAll), pages = Number(object(result.UserArea).NumberOfPages);
+      if (Number.isFinite(total) && total > USAJOBS_MAX_ROWS) throw new CollectionError("INCOMPLETE_BOARD");
+      const rawRows = array(result.SearchResultItems).length;
+      if (rawRows === 0 || Number.isFinite(pages) && page >= pages)
+        return { jobs, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), sourceUrl: url, skippedMalformed };
+      skip += rawRows;
+      continue;
     }
     if (normalized2.length === 0)
       return { jobs, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), sourceUrl: url, skippedMalformed };
@@ -22118,22 +22494,22 @@ function descriptionItems(rawDescription) {
   const typed = /\b(?:employment|job|position|contract|worker|work|time|role|engagement|hours)\s*(?:type|category|status)?\s*[:\-–|]\s*([A-Za-z][A-Za-z0-9 /,()-]{1,40})/gi;
   for (const match of text2.matchAll(typed)) {
     if (!/type|category|status|hours|schedule/i.test(match[0].split(/[:\-–|]/)[0]) && !/\bhours\b/i.test(match[0])) continue;
-    const label = employmentTypeFromLabel(match[1]);
-    if (label && match.index !== void 0) push(label.type, match.index, match[0].length, label.confidence);
+    const label2 = employmentTypeFromLabel(match[1]);
+    if (label2 && match.index !== void 0) push(label2.type, match.index, match[0].length, label2.confidence);
   }
   const schedule = /\bschedule\s*[:\-–|]\s*(full[- ]?time|part[- ]?time)\b/gi;
   for (const match of text2.matchAll(schedule)) {
-    const label = employmentTypeFromLabel(match[1]);
-    if (label && match.index !== void 0) push(label.type, match.index, match[0].length, "high");
+    const label2 = employmentTypeFromLabel(match[1]);
+    if (label2 && match.index !== void 0) push(label2.type, match.index, match[0].length, "high");
   }
   const sentence = /\bthis (?:is (?:a|an)|(?:position|role|job|opportunity) is (?:a|an))\s+(?:[\w-]+\s+){0,3}?(full[- ]time|part[- ]time|contract|temporary|fixed[- ]term|internship|co[- ]?op|apprenticeship|seasonal|freelance)\b/gi;
   for (const match of text2.matchAll(sentence)) {
-    const label = employmentTypeFromLabel(match[1]);
-    if (!label || match.index === void 0) continue;
+    const label2 = employmentTypeFromLabel(match[1]);
+    if (!label2 || match.index === void 0) continue;
     const tail = text2.slice(match.index + match[0].length, match.index + match[0].length + 30);
     if (STUDY_CONTEXT.test(tail)) continue;
     const commitment = tail.match(/^\s+(contract(?:or)?|fixed[- ]term|temporary|temp|seasonal|internship|intern|co[- ]?op|apprenticeship)\b/i);
-    const type = commitment ? employmentTypeFromLabel(commitment[1])?.type ?? label.type : label.type;
+    const type = commitment ? employmentTypeFromLabel(commitment[1])?.type ?? label2.type : label2.type;
     push(type, match.index, match[0].length + (commitment ? commitment[0].length : 0), "high");
   }
   const prose = /\b(full[- ]time|part[- ]time|temporary|seasonal|fixed[- ]term)\s+(?:position|role|opportunity|employment|job|hours|basis|contract)\b/gi;
@@ -22142,10 +22518,10 @@ function descriptionItems(rawDescription) {
     const before = text2.slice(Math.max(0, match.index - 25), match.index);
     const after = text2.slice(match.index + match[0].length, match.index + match[0].length + 25);
     if (STUDY_CONTEXT.test(before) || STUDY_CONTEXT.test(after)) continue;
-    const label = employmentTypeFromLabel(match[1]);
-    if (!label) continue;
-    const isContract = /\bcontract\b/i.test(match[0]) && label.type !== "contract";
-    push(isContract ? "contract" : label.type, match.index, match[0].length, "medium");
+    const label2 = employmentTypeFromLabel(match[1]);
+    if (!label2) continue;
+    const isContract = /\bcontract\b/i.test(match[0]) && label2.type !== "contract";
+    push(isContract ? "contract" : label2.type, match.index, match[0].length, "medium");
   }
   const ja = /雇用形態\s*[:：]?\s*(正社員|契約社員|パート(?:タイム)?|アルバイト|派遣(?:社員)?|業務委託|インターン(?:シップ)?|嘱託)/g;
   for (const match of text2.matchAll(ja)) {
@@ -25350,12 +25726,12 @@ function kindOf(item) {
   if (kinds?.has("metro") && !kinds.has("city")) return "metro";
   return "city";
 }
-function gazetteerCountryEvidence(label) {
+function gazetteerCountryEvidence(label2) {
   const result = { countries: [], matches: [], ambiguous: [], conflict: false };
-  if (typeof label !== "string" || !label.trim()) return result;
+  if (typeof label2 !== "string" || !label2.trim()) return result;
   const allItems = [];
   let segmentIndex = 0;
-  for (const unit of label.normalize("NFKC").split(unitSeparator)) {
+  for (const unit of label2.normalize("NFKC").split(unitSeparator)) {
     const unitItems = [];
     const groups = [];
     for (const raw of unit.split(segmentSeparator)) {
@@ -25495,26 +25871,26 @@ async function pageAll(table, select, filter, orderBy = "id") {
   return out;
 }
 var UPSERT_BATCH = 100;
-async function upsertSplit(table, rows, conflict, label, offset) {
+async function upsertSplit(table, rows, conflict, label2, offset) {
   const { error } = await supabase.from(table).upsert(rows, { onConflict: conflict });
   if (!error) return;
   if (error.code === "57014" && rows.length > 10) {
     const half = Math.ceil(rows.length / 2);
-    await upsertSplit(table, rows.slice(0, half), conflict, label, offset);
-    await upsertSplit(table, rows.slice(half), conflict, label, offset + half);
+    await upsertSplit(table, rows.slice(0, half), conflict, label2, offset);
+    await upsertSplit(table, rows.slice(half), conflict, label2, offset + half);
     return;
   }
-  throw new Error(`${label} @${offset}: ${error.message}`);
+  throw new Error(`${label2} @${offset}: ${error.message}`);
 }
-async function upsertBatches(table, rows, conflict, label) {
+async function upsertBatches(table, rows, conflict, label2) {
   for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
-    await upsertSplit(table, rows.slice(i, i + UPSERT_BATCH), conflict, label, i);
+    await upsertSplit(table, rows.slice(i, i + UPSERT_BATCH), conflict, label2, i);
     if (i % 5e3 === 0)
       process.stdout.write(
-        `\r${label}: ${Math.min(i + UPSERT_BATCH, rows.length)}/${rows.length}`
+        `\r${label2}: ${Math.min(i + UPSERT_BATCH, rows.length)}/${rows.length}`
       );
   }
-  if (rows.length) console.log(`\r${label}: ${rows.length}/${rows.length}`);
+  if (rows.length) console.log(`\r${label2}: ${rows.length}/${rows.length}`);
 }
 var SEEDS = [
   {
@@ -25630,7 +26006,7 @@ async function poll() {
   const boards = await pageAll(
     "ats_companies",
     "id,name,ats,board_token,board_url,tier",
-    (q) => q.in("ats", ["greenhouse", "lever", "ashby"]).in("verify_status", ["active", "empty"])
+    (q) => q.in("ats", [...PRIMARY_ATS]).in("verify_status", ["active", "empty"])
   );
   boards.sort(
     (a, b) => Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven")
@@ -25638,6 +26014,13 @@ async function poll() {
   let selected = boards.filter(
     (b) => (ATS_FILTER === "all" || b.ats === ATS_FILTER) && (TIER_FILTER === "all" || b.tier === TIER_FILTER)
   );
+  const usajobs = usajobsCredentials();
+  if (!usajobs && selected.some((b) => b.ats === "usajobs")) {
+    console.warn(
+      `usajobs: ${selected.filter((b) => b.ats === "usajobs").length} board(s) skipped \u2014 USAJOBS_API_KEY and USAJOBS_USER_AGENT are not set`
+    );
+    selected = selected.filter((b) => b.ats !== "usajobs");
+  }
   if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
   console.log(
     `boards: ${selected.length} selected of ${boards.length} (ats=${ATS_FILTER}, tier=${TIER_FILTER}, limit=${BOARD_LIMIT || "none"})`
@@ -25687,7 +26070,8 @@ async function poll() {
           board.ats,
           board.board_token,
           fetch,
-          eu
+          eu,
+          usajobs
         );
         measure.fetchMs += Date.now() - fetchStart;
         if (snapshot.skippedMalformed) {
@@ -25876,12 +26260,13 @@ DONE \u2014 active:${counts.active} empty:${counts.empty} unknown:${counts.unkno
   );
 }
 async function probe(ats, slug, registryUrl) {
-  if (!["greenhouse", "lever", "ashby"].includes(ats)) return "unknown";
+  if (!isPrimaryAts(ats)) return "unknown";
+  if (ats === "usajobs" && !usajobsCredentials()) return "unknown";
   try {
     const eu = ats === "lever" && Boolean(
       registryUrl && new URL(registryUrl).hostname === "jobs.eu.lever.co"
     );
-    const result = await fetchPrimaryBoard(ats, slug, fetch, eu);
+    const result = await fetchPrimaryBoard(ats, slug, fetch, eu, usajobsCredentials());
     return result.jobs.length ? "active" : "empty";
   } catch {
     return "unknown";

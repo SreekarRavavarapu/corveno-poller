@@ -9,14 +9,19 @@
  *
  * Data sources gratefully consumed (see README attribution):
  * SimplifyJobs lists, vanshb03 lists, jobhive/ats-scrapers registry,
- * and the public Greenhouse / Lever / Ashby job board APIs.
+ * the public Greenhouse / Lever / Ashby job board APIs, the Recruitee /
+ * Workable / Breezy / Pinpoint / Teamtailor career-site feeds and the USAJOBS
+ * Search API (credited as the source wherever its announcements are shown).
  */
 import { createClient } from "@supabase/supabase-js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   fetchPrimaryBoard,
   boundedJson,
+  usajobsCredentials,
+  isPrimaryAts,
   CollectionError,
+  PRIMARY_ATS,
   type PrimaryAts,
 } from "./primary-source";
 import { employmentTypeEvidence } from "./employment-evidence";
@@ -361,7 +366,7 @@ async function poll() {
     tier: string;
   }>("ats_companies", "id,name,ats,board_token,board_url,tier", (q) =>
     q
-      .in("ats", ["greenhouse", "lever", "ashby"])
+      .in("ats", [...PRIMARY_ATS])
       .in("verify_status", ["active", "empty"]),
   );
   boards.sort(
@@ -373,6 +378,16 @@ async function poll() {
       (ATS_FILTER === "all" || b.ats === ATS_FILTER) &&
       (TIER_FILTER === "all" || b.tier === TIER_FILTER),
   );
+  // USAJOBS needs the account holder's registered key (USAJOBS_API_KEY) and
+  // registered e-mail (USAJOBS_USER_AGENT). Without them its boards are
+  // skipped for this run — logged, never counted as failures.
+  const usajobs = usajobsCredentials();
+  if (!usajobs && selected.some((b) => b.ats === "usajobs")) {
+    console.warn(
+      `usajobs: ${selected.filter((b) => b.ats === "usajobs").length} board(s) skipped — USAJOBS_API_KEY and USAJOBS_USER_AGENT are not set`,
+    );
+    selected = selected.filter((b) => b.ats !== "usajobs");
+  }
   if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
   console.log(
     `boards: ${selected.length} selected of ${boards.length} (ats=${ATS_FILTER}, tier=${TIER_FILTER}, limit=${BOARD_LIMIT || "none"})`,
@@ -428,6 +443,7 @@ async function poll() {
           board.board_token,
           fetch,
           eu,
+          usajobs,
         );
         measure.fetchMs += Date.now() - fetchStart;
         if (snapshot.skippedMalformed) {
@@ -662,14 +678,16 @@ async function probe(
   slug: string,
   registryUrl: string | null,
 ): Promise<"active" | "empty" | "unknown"> {
-  if (!["greenhouse", "lever", "ashby"].includes(ats)) return "unknown";
+  if (!isPrimaryAts(ats)) return "unknown";
+  // Without credentials a USAJOBS probe cannot run; the registry state stays.
+  if (ats === "usajobs" && !usajobsCredentials()) return "unknown";
   try {
     const eu =
       ats === "lever" &&
       Boolean(
         registryUrl && new URL(registryUrl).hostname === "jobs.eu.lever.co",
       );
-    const result = await fetchPrimaryBoard(ats as PrimaryAts, slug, fetch, eu);
+    const result = await fetchPrimaryBoard(ats, slug, fetch, eu, usajobsCredentials());
     return result.jobs.length ? "active" : "empty";
   } catch {
     return "unknown";

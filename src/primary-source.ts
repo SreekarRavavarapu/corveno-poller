@@ -985,6 +985,53 @@ const USAJOBS_PAGE_ROWS = 500,
   USAJOBS_MAX_ROWS = 10000,
   USAJOBS_MAX_BOARD_BYTES = 134217728,
   USAJOBS_BOARD_TIMEOUT_MS = 300000;
+/* Teamtailor career sites serve JSON Feed 1.1 pages of 100 items linked by
+ * `next_url` (a Footasylum feed had 100 items + next_url on 2026-09-16). The
+ * pages are followed only on the board's own host and path, under a page,
+ * byte and time bound, and merged into one whole-board wrapper without
+ * `next_url` so the whole-board rules in parseBoardResponse still apply. */
+const TEAMTAILOR_MAX_PAGES = 25,
+  TEAMTAILOR_MAX_BYTES = 25165824,
+  TEAMTAILOR_TIMEOUT_MS = 60000;
+export async function teamtailorPages(
+  url: string,
+  fetcher: typeof fetch = fetch,
+  started = Date.now(),
+): Promise<Record<string, unknown>> {
+  const first = new URL(url);
+  const items: unknown[] = [];
+  let next: string | null = url,
+    bytes = 0,
+    wrapper: Record<string, unknown> = {};
+  for (let page = 1; next; page++) {
+    if (page > TEAMTAILOR_MAX_PAGES) throw new CollectionError("INCOMPLETE_BOARD");
+    if (Date.now() - started > TEAMTAILOR_TIMEOUT_MS) throw new CollectionError("BOARD_TIMEOUT");
+    const body = object(
+      await boundedJson(next, fetcher, 8388608, Math.min(30000, TEAMTAILOR_TIMEOUT_MS - (Date.now() - started))),
+    );
+    if (!Array.isArray(body.items)) throw new CollectionError("MALFORMED_BOARD");
+    bytes += Buffer.byteLength(JSON.stringify(body.items));
+    if (bytes > TEAMTAILOR_MAX_BYTES) throw new CollectionError("BOARD_TOO_LARGE");
+    if (page === 1) wrapper = { ...body };
+    items.push(...body.items);
+    const link = typeof body.next_url === "string" ? body.next_url : null;
+    if (link) {
+      let target: URL;
+      try {
+        target = new URL(link);
+      } catch {
+        throw new CollectionError("UNEXPECTED_PAGINATION");
+      }
+      // Only the same career site's own feed may continue the listing.
+      if (target.protocol !== "https:" || target.host !== first.host || target.pathname !== first.pathname)
+        throw new CollectionError("UNEXPECTED_PAGINATION");
+      if (body.items.length === 0) throw new CollectionError("UNSTABLE_PAGINATION");
+    }
+    next = link;
+  }
+  const { next_url: _dropped, ...rest } = wrapper;
+  return { ...rest, items };
+}
 export async function fetchPrimaryBoard(
   ats: PrimaryAts,
   slug: string,
@@ -1005,6 +1052,8 @@ export async function fetchPrimaryBoard(
     if (!Array.isArray(list)) throw new CollectionError("MALFORMED_BOARD");
     return snapshot(parseBoardResponse(ats, slug, await breezyWithDescriptions(slug, list, fetcher, started)));
   }
+  if (ats === "teamtailor")
+    return snapshot(parseBoardResponse(ats, slug, await teamtailorPages(url, fetcher, started)));
   if (ats !== "lever" && ats !== "usajobs")
     return snapshot(parseBoardResponse(ats, slug, await boundedJson(url, fetcher)));
   const usajobs = ats === "usajobs" ? (credentials ?? usajobsCredentials()) : null;

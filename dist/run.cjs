@@ -22328,6 +22328,41 @@ var USAJOBS_PAGE_ROWS = 500;
 var USAJOBS_MAX_ROWS = 1e4;
 var USAJOBS_MAX_BOARD_BYTES = 134217728;
 var USAJOBS_BOARD_TIMEOUT_MS = 3e5;
+var TEAMTAILOR_MAX_PAGES = 25;
+var TEAMTAILOR_MAX_BYTES = 25165824;
+var TEAMTAILOR_TIMEOUT_MS = 6e4;
+async function teamtailorPages(url, fetcher = fetch, started = Date.now()) {
+  const first = new URL(url);
+  const items = [];
+  let next = url, bytes = 0, wrapper = {};
+  for (let page = 1; next; page++) {
+    if (page > TEAMTAILOR_MAX_PAGES) throw new CollectionError("INCOMPLETE_BOARD");
+    if (Date.now() - started > TEAMTAILOR_TIMEOUT_MS) throw new CollectionError("BOARD_TIMEOUT");
+    const body = object(
+      await boundedJson(next, fetcher, 8388608, Math.min(3e4, TEAMTAILOR_TIMEOUT_MS - (Date.now() - started)))
+    );
+    if (!Array.isArray(body.items)) throw new CollectionError("MALFORMED_BOARD");
+    bytes += Buffer.byteLength(JSON.stringify(body.items));
+    if (bytes > TEAMTAILOR_MAX_BYTES) throw new CollectionError("BOARD_TOO_LARGE");
+    if (page === 1) wrapper = { ...body };
+    items.push(...body.items);
+    const link = typeof body.next_url === "string" ? body.next_url : null;
+    if (link) {
+      let target;
+      try {
+        target = new URL(link);
+      } catch {
+        throw new CollectionError("UNEXPECTED_PAGINATION");
+      }
+      if (target.protocol !== "https:" || target.host !== first.host || target.pathname !== first.pathname)
+        throw new CollectionError("UNEXPECTED_PAGINATION");
+      if (body.items.length === 0) throw new CollectionError("UNSTABLE_PAGINATION");
+    }
+    next = link;
+  }
+  const { next_url: _dropped, ...rest } = wrapper;
+  return { ...rest, items };
+}
 async function fetchPrimaryBoard(ats, slug, fetcher = fetch, eu = false, credentials = null) {
   const url = boardUrl(ats, slug, eu), started = Date.now();
   const snapshot = (parsed) => ({
@@ -22341,6 +22376,8 @@ async function fetchPrimaryBoard(ats, slug, fetcher = fetch, eu = false, credent
     if (!Array.isArray(list)) throw new CollectionError("MALFORMED_BOARD");
     return snapshot(parseBoardResponse(ats, slug, await breezyWithDescriptions(slug, list, fetcher, started)));
   }
+  if (ats === "teamtailor")
+    return snapshot(parseBoardResponse(ats, slug, await teamtailorPages(url, fetcher, started)));
   if (ats !== "lever" && ats !== "usajobs")
     return snapshot(parseBoardResponse(ats, slug, await boundedJson(url, fetcher)));
   const usajobs = ats === "usajobs" ? credentials ?? usajobsCredentials() : null;

@@ -21790,11 +21790,11 @@ function employmentType(value) {
     // the same reading as employmentTypeFromLabel in employment-evidence.
     fulltimepermanent: "full_time",
     parttimepermanent: "part_time",
-    fulltimefixedterm: "contract",
-    parttimefixedterm: "contract",
+    fulltimefixedterm: "full_time",
+    parttimefixedterm: "part_time",
     fulltimetemporary: "temporary",
     parttimetemporary: "temporary",
-    fixedterm: "contract",
+    fixedterm: "full_time",
     freelance: "contract",
     temp: "temporary",
     seasonal: "temporary"

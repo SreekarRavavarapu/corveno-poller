@@ -22106,6 +22106,37 @@ function normalizeJob(ats, slug, raw) {
     issues
   };
 }
+function mergeWorkableLocations(rows) {
+  if (!Array.isArray(rows)) return rows;
+  const merged = /* @__PURE__ */ new Map();
+  const order = [];
+  for (const row of rows) {
+    const job = object(row);
+    const code = typeof job.shortcode === "string" ? job.shortcode : null;
+    if (!code) {
+      order.push(row);
+      continue;
+    }
+    const seen = merged.get(code);
+    const places = array(job.locations).length ? array(job.locations) : job.city || job.state || job.country ? [{ city: job.city, region: job.state, country: job.country, countryCode: job.countryCode ?? job.country_code }] : [];
+    if (!seen) {
+      const first = { ...job, locations: [...places] };
+      merged.set(code, first);
+      order.push(first);
+      continue;
+    }
+    const known = new Set(array(seen.locations).map((l) => JSON.stringify(l)));
+    for (const place of places) {
+      const key = JSON.stringify(place);
+      if (!known.has(key)) {
+        known.add(key);
+        seen.locations.push(place);
+      }
+    }
+  }
+  for (const job of merged.values()) job.locations.sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1);
+  return order;
+}
 function boardRows(ats, data) {
   const wrapper = object(data);
   switch (ats) {
@@ -22116,6 +22147,8 @@ function boardRows(ats, data) {
       return wrapper.offers;
     case "pinpoint":
       return wrapper.data;
+    case "workable":
+      return mergeWorkableLocations(wrapper.jobs);
     case "teamtailor":
       return wrapper.items;
     case "usajobs":

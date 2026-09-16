@@ -692,6 +692,43 @@ function normalizeJob(ats: PrimaryAts, slug: string, raw: unknown): SourceJob {
   };
 }
 /** Where each provider keeps its records in a board response. */
+/* The Workable widget lists a job once per location with the same shortcode
+ * (Datacom: 234 entries for 98 jobs on 2026-09-16), which the identity rule
+ * reads as a duplicate. Entries sharing a shortcode are one posting: their
+ * `locations` are unioned in a stable order and the first entry supplies
+ * every other field. Anything that is not a well-formed list is returned as
+ * is so the whole-board checks still apply. */
+export function mergeWorkableLocations(rows: unknown): unknown {
+  if (!Array.isArray(rows)) return rows;
+  const merged = new Map<string, Record<string, unknown>>();
+  const order: unknown[] = [];
+  for (const row of rows) {
+    const job = object(row);
+    const code = typeof job.shortcode === "string" ? job.shortcode : null;
+    if (!code) {
+      order.push(row);
+      continue;
+    }
+    const seen = merged.get(code);
+    const places = array(job.locations).length ? array(job.locations) : job.city || job.state || job.country ? [{ city: job.city, region: job.state, country: job.country, countryCode: job.countryCode ?? job.country_code }] : [];
+    if (!seen) {
+      const first = { ...job, locations: [...places] };
+      merged.set(code, first);
+      order.push(first);
+      continue;
+    }
+    const known = new Set(array(seen.locations).map((l) => JSON.stringify(l)));
+    for (const place of places) {
+      const key = JSON.stringify(place);
+      if (!known.has(key)) {
+        known.add(key);
+        (seen.locations as unknown[]).push(place);
+      }
+    }
+  }
+  for (const job of merged.values()) (job.locations as unknown[]).sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+  return order;
+}
 function boardRows(ats: PrimaryAts, data: unknown): unknown {
   const wrapper = object(data);
   switch (ats) {
@@ -702,6 +739,8 @@ function boardRows(ats: PrimaryAts, data: unknown): unknown {
       return wrapper.offers;
     case "pinpoint":
       return wrapper.data;
+    case "workable":
+      return mergeWorkableLocations(wrapper.jobs);
     case "teamtailor":
       return wrapper.items;
     case "usajobs":

@@ -9,6 +9,7 @@
     "seed": "node dist/run.cjs seed",
     "verify": "node dist/run.cjs verify",
     "typecheck": "tsc -p tsconfig.json",
+    "test": "esbuild tests/*.test.ts --bundle --platform=node --format=cjs --outdir=.test-dist --log-level=warning && node --test .test-dist/*.test.js",
     "sync": "./sync-from-app.sh"
   },
   "devDependencies": {

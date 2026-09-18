@@ -1,7 +1,11 @@
 name: Collector pilot
 # Bounded, manually dispatched run of the collector against a subset of boards.
-# Shares the `poll` concurrency group so it never runs alongside the scheduled
-# poll; the scheduled poll simply queues behind it.
+# The concurrency group follows the ATS input so a pilot on one source queues
+# behind (and blocks) that source's scheduled poll shard (poll-greenhouse,
+# poll-lever, poll-ashby); any other value runs beside the shards, which is safe:
+# both claim boards through claim_due_boards leases, so no board is fetched
+# twice. A pilot with a tier filter uses the legacy selection (no leases, no
+# schedule updates) — keep those runs small.
 on:
   workflow_dispatch:
     inputs:
@@ -19,7 +23,7 @@ on:
         required: true
 
 concurrency:
-  group: poll
+  group: poll-${{ inputs.ats }}
   cancel-in-progress: false
 
 jobs:

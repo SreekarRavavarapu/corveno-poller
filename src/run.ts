@@ -25,7 +25,15 @@ import {
   type PrimaryAts,
 } from "./primary-source";
 import { employmentTypeEvidence } from "./employment-evidence";
-import { gazetteerCountryEvidence, combineCountryEvidence } from "./location-gazetteer";
+import { resolveLocationCountries, locationCountryEvidenceFields } from "./location-country";
+import {
+  claimSources,
+  createClaimQueue,
+  isMissingRpc,
+  passRunKey,
+  shardSources,
+  type ClaimQueueStats,
+} from "./board-scheduling";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -52,6 +60,18 @@ const BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATC
  * runtime captures raw records on demand for listings a search touches. */
 const STORE_SNAPSHOTS = process.env.COLLECT_STORE_SNAPSHOTS === "1";
 const BATCH_MAX_BYTES = Math.min(8 * 1024 * 1024, Math.max(65536, Number(process.env.COLLECT_BATCH_BYTES ?? 1048576) || 1048576));
+/* Scheduled polling (Phase 1 item 1.4, migration 20260917120000). A pass no
+ * longer fetches every board: it claims due boards in fairness-ordered batches
+ * (claim_due_boards, lease owner = the pass run key) up to a per-pass board
+ * cap and a wall-time budget for claiming, and reports each board's outcome
+ * (finish_board_poll) so its next due time follows its change rate.
+ * COLLECT_ATS_SHARD partitions the registry across parallel workflow jobs:
+ * greenhouse | lever | ashby | others | all, or a comma-separated list. */
+const BOARD_CAP = Math.max(1, Math.floor(Number(process.env.COLLECT_BOARD_CAP ?? 4000) || 4000));
+const PASS_BUDGET_SECONDS = Math.max(30, Number(process.env.COLLECT_PASS_BUDGET_SECONDS ?? 900) || 900);
+const LEASE_SECONDS = Math.min(14400, Math.max(60, Math.floor(Number(process.env.COLLECT_LEASE_SECONDS ?? 1800) || 1800)));
+const CLAIM_BATCH = Math.min(500, Math.max(8, Math.floor(Number(process.env.COLLECT_CLAIM_BATCH ?? 64) || 64)));
+const ATS_SHARD = (process.env.COLLECT_ATS_SHARD ?? "all").toLowerCase();
 /* ---------------- classification ---------------- */
 
 const INTERN_RE = /\bintern(ship)?s?\b|\bco[- ]?op\b|\bapprentice(ship)?\b/i;
@@ -324,10 +344,17 @@ async function seed() {
         if (!(seen > restampBase)) restamp.push(previous.id);
         continue;
       }
+      // Seed lists carry no structured country; the same label resolver the
+      // board collector uses fills it in (quote and method recorded). The
+      // country stays outside the content hash so unchanged rows are not
+      // rewritten for it — the recountry mode backfills those.
+      const country = resolveLocationCountries(content.locations);
       rows.push({
         source: s.source,
         source_uid: l.id,
         ...content,
+        country_codes: country.countries,
+        country_evidence: { source: "seed-list", ...locationCountryEvidenceFields(country) },
         classify_source: "seed",
         source_content_sha256: sha,
         source_checked_at: checkedAt,
@@ -354,46 +381,89 @@ async function seed() {
 
 /* ---------------- board poll ---------------- */
 
+type Board = {
+  id: string;
+  name: string;
+  ats: PrimaryAts;
+  board_token: string;
+  board_url: string | null;
+  tier: string;
+};
+const BOARD_COLUMNS = "id,name,ats,board_token,board_url,tier";
+type SourceTally = { boards: number; failed: number; written: number; closed: number; missed: number };
+
 async function poll() {
-  // Board-scoped reads/writes use indexed keys. Never load the entire corpus
-  // into process memory or infer closure for boards not successfully polled.
-  const boards = await pageAll<{
-    id: string;
-    name: string;
-    ats: PrimaryAts;
-    board_token: string;
-    board_url: string | null;
-    tier: string;
-  }>("ats_companies", "id,name,ats,board_token,board_url,tier", (q) =>
-    q
-      .in("ats", [...PRIMARY_ATS])
-      .in("verify_status", ["active", "empty"]),
-  );
-  boards.sort(
-    (a, b) =>
-      Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven"),
-  );
-  let selected = boards.filter(
-    (b) =>
-      (ATS_FILTER === "all" || b.ats === ATS_FILTER) &&
-      (TIER_FILTER === "all" || b.tier === TIER_FILTER),
-  );
+  const startedAt = new Date();
   // USAJOBS needs the account holder's registered key (USAJOBS_API_KEY) and
   // registered e-mail (USAJOBS_USER_AGENT). Without them its boards are
-  // skipped for this run — logged, never counted as failures.
+  // skipped for this run — never leased, never counted as failures.
   const usajobs = usajobsCredentials();
-  if (!usajobs && selected.some((b) => b.ats === "usajobs")) {
-    console.warn(
-      `usajobs: ${selected.filter((b) => b.ats === "usajobs").length} board(s) skipped — USAJOBS_API_KEY and USAJOBS_USER_AGENT are not set`,
-    );
-    selected = selected.filter((b) => b.ats !== "usajobs");
-  }
-  if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
+  const runKey = passRunKey(process.env, ATS_SHARD, randomUUID);
+  const sources = claimSources({ shard: ATS_SHARD, atsFilter: ATS_FILTER, all: PRIMARY_ATS, usajobs: Boolean(usajobs) });
+  if (!usajobs && shardSources(ATS_SHARD, PRIMARY_ATS).includes("usajobs") && (ATS_FILTER === "all" || ATS_FILTER === "usajobs"))
+    console.warn("usajobs: boards skipped — USAJOBS_API_KEY and USAJOBS_USER_AGENT are not set");
+  const cap = BOARD_LIMIT > 0 ? Math.min(BOARD_LIMIT, BOARD_CAP) : BOARD_CAP;
   console.log(
-    `boards: ${selected.length} selected of ${boards.length} (ats=${ATS_FILTER}, tier=${TIER_FILTER}, limit=${BOARD_LIMIT || "none"})`,
+    `pass ${runKey}: shard=${ATS_SHARD} sources=${sources.join(",") || "none"} ats=${ATS_FILTER} tier=${TIER_FILTER} cap=${cap} budget=${PASS_BUDGET_SECONDS}s lease=${LEASE_SECONDS}s batch=${CLAIM_BATCH}`,
   );
-  const queue = [...selected],
-    stats = { completed: 0, failed: 0, postings: 0 },
+  if (!sources.length) {
+    console.log("boards: nothing to claim for this shard/filter");
+    return;
+  }
+  // Scheduled selection: claim_due_boards leases due boards in fairness order
+  // (round-robin across sources; overdue > 2 h, intern-proven, change rate,
+  // most overdue inside a source) and the pass reports every outcome through
+  // finish_board_poll. Legacy selection — every active/empty board,
+  // intern-proven first, no leases, no schedule updates — remains for a pilot
+  // with a tier filter (a measurement, not a schedule) and for a database
+  // without the RPCs (migration not yet applied), with a warning instead of a
+  // failed pass. Board-scoped reads/writes use indexed keys either way; the
+  // corpus is never loaded into process memory.
+  const claim = async (limit: number): Promise<Board[]> => {
+    const { data, error } = await supabase.rpc("claim_due_boards", {
+      p_limit: limit,
+      p_lease_seconds: LEASE_SECONDS,
+      p_owner: runKey,
+      p_ats: sources.join(","),
+    });
+    if (error) throw Object.assign(new Error(`claim_due_boards: ${error.message}`), { code: error.code });
+    return ((data ?? []) as Board[]).filter((b) => isPrimaryAts(b.ats));
+  };
+  let scheduled = TIER_FILTER === "all";
+  let initial: Board[] = [];
+  if (scheduled) {
+    try {
+      initial = await claim(Math.min(CLAIM_BATCH, cap));
+    } catch (error) {
+      if (!isMissingRpc(error as { code?: string; message?: string })) throw error;
+      scheduled = false;
+      console.warn(
+        "claim_due_boards is not available (migration 20260917120000 not applied) — polling every active/empty board this pass without leases",
+      );
+    }
+  } else console.log(`tier filter ${TIER_FILTER}: legacy selection without leases or schedule updates`);
+  let next: () => Promise<Board | null>;
+  let queueStats: () => ClaimQueueStats;
+  if (scheduled) {
+    const claimQueue = createClaimQueue<Board>({ claim, cap, budgetMs: PASS_BUDGET_SECONDS * 1000, batch: CLAIM_BATCH, initial });
+    next = claimQueue.next;
+    queueStats = claimQueue.stats;
+  } else {
+    const boards = await pageAll<Board>("ats_companies", BOARD_COLUMNS, (q) =>
+      q.in("ats", sources).in("verify_status", ["active", "empty"]),
+    );
+    boards.sort((a, b) => Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven"));
+    let selected = boards.filter((b) => TIER_FILTER === "all" || b.tier === TIER_FILTER);
+    if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
+    console.log(`boards: ${selected.length} selected of ${boards.length} (legacy selection, limit=${BOARD_LIMIT || "none"})`);
+    const legacyStart = Date.now();
+    const legacyQueue = [...selected];
+    next = async () => legacyQueue.shift() ?? null;
+    queueStats = () => ({ claimed: selected.length, claims: 0, stoppedBy: null, error: null, elapsedMs: Date.now() - legacyStart });
+  }
+  const perSource: Record<string, SourceTally> = {};
+  let scheduleErrors = 0;
+  const stats = { completed: 0, failed: 0, postings: 0 },
     measure = {
       sourceBytes: 0,
       descriptionChars: 0,
@@ -403,6 +473,7 @@ async function poll() {
       typedFromText: 0,
       withCountry: 0,
       countryFromGazetteer: 0,
+      countryFromLabels: 0,
       batches: 0,
       splits: 0,
       skippedMalformed: 0,
@@ -421,10 +492,20 @@ async function poll() {
   }
   const worker = async () => {
     for (;;) {
-      const board = queue.shift();
+      const board = await next();
       if (!board) return;
       const runId = randomUUID();
-      let started = false;
+      const tally = (perSource[board.ats] ??= { boards: 0, failed: 0, written: 0, closed: 0, missed: 0 });
+      tally.boards++;
+      // Per-board outcome for the schedule: "changed" when this pass wrote
+      // new/updated/reopened rows (apply batches), closed rows or recorded a
+      // first miss (finish) — a board that just lost a posting is polled again
+      // soon so the closure lands on the next complete snapshot.
+      let started = false,
+        written = 0,
+        closed = 0,
+        missed = 0,
+        failed = false;
       try {
         await rpc("begin_corpus_collection", {
           p_company_id: board.id,
@@ -465,24 +546,18 @@ async function poll() {
             job.structured_job_type ??
             (employment.conflict ? null : employment.type);
           // Country: structured provider fields and explicit country labels
-          // (primary-source) first; otherwise the conservative seven-market
-          // gazetteer (unambiguous city/region names only, never a guess).
+          // (primary-source) first; otherwise the deterministic location-label
+          // resolver (location-country: explicit and remote-scoped labels, the
+          // seven-market gazetteer, explicit non-market country names and
+          // unambiguous world cities — every country carries its quote, never
+          // a guess). Regions, "Remote" alone and ambiguous names stay empty
+          // and are recorded as such.
           let country_codes = job.country_codes;
           let country_evidence = job.country_evidence;
           if (!country_codes.length && job.locations.length) {
-            const gazetteer = gazetteerCountryEvidence(job.locations.join(" ; "));
-            const combined = combineCountryEvidence(job.country_codes, gazetteer);
-            if (combined.length) {
-              country_codes = combined;
-              country_evidence = {
-                ...country_evidence,
-                gazetteer: gazetteer.matches,
-                gazetteer_ambiguous: gazetteer.ambiguous,
-                country_method: "gazetteer",
-              };
-            } else if (gazetteer.ambiguous.length || gazetteer.conflict) {
-              country_evidence = { ...country_evidence, gazetteer_ambiguous: gazetteer.ambiguous, gazetteer_conflict: gazetteer.conflict };
-            }
+            const resolved = resolveLocationCountries(job.locations);
+            if (resolved.countries.length) country_codes = resolved.countries;
+            country_evidence = { ...country_evidence, ...locationCountryEvidenceFields(resolved) };
           }
           const { source_record_json, ...withoutRaw } = job;
           return {
@@ -508,6 +583,7 @@ async function poll() {
             }
             if (row.country_codes.length) measure.withCountry++;
             if (row.country_evidence.country_method === "gazetteer") measure.countryFromGazetteer++;
+            if (row.country_evidence.location_evidence) measure.countryFromLabels++;
           }
         // Batches carry a 0-based sequential index. The database records the
         // applied indexes per run, so a retransmitted batch (timeout, retry)
@@ -534,6 +610,7 @@ async function poll() {
             measure.dbMs += Date.now() - dbStart;
             measure.batches++;
             measure.written += applied?.written ?? 0;
+            written += applied?.written ?? 0;
             measure.unchanged += applied?.unchanged ?? 0;
             measure.bumped += applied?.bumped ?? 0;
           } catch (error) {
@@ -566,22 +643,29 @@ async function poll() {
           offset = end;
         }
         const finishStart = Date.now();
-        await rpc("finish_corpus_collection", {
+        const finished = (await rpc("finish_corpus_collection", {
           p_run_id: runId,
           p_expected_count: rows.length,
           p_checked_at: snapshot.checkedAt,
           p_source_url: snapshot.sourceUrl,
           p_error_code: null,
-        });
+        })) as { closed?: number; firstMiss?: number } | null;
         measure.dbMs += Date.now() - finishStart;
+        closed = finished?.closed ?? 0;
+        missed = finished?.firstMiss ?? 0;
         stats.completed++;
         stats.postings += rows.length;
+        tally.written += written;
+        tally.closed += closed;
+        tally.missed += missed;
         if ((stats.completed + stats.failed) % 250 === 0)
           console.log(
-            `boards:${stats.completed + stats.failed}/${selected.length} postings:${stats.postings} failed:${stats.failed}`,
+            `boards:${stats.completed + stats.failed}/${queueStats().claimed} postings:${stats.postings} failed:${stats.failed}`,
           );
       } catch (error) {
         stats.failed++;
+        failed = true;
+        tally.failed++;
         const code =
           error instanceof CollectionError
             ? error.code
@@ -607,10 +691,36 @@ async function poll() {
             });
           }
       }
+      // Release the lease and let the database schedule the next poll. A
+      // failure here is logged (the lease simply expires); it never fails
+      // the board or the pass.
+      if (scheduled) {
+        const { error } = await supabase.rpc("finish_board_poll", {
+          p_board_id: board.id,
+          p_owner: runKey,
+          p_changed: written > 0 || closed > 0 || missed > 0,
+          p_failed: failed,
+        });
+        if (error) {
+          scheduleErrors++;
+          if (scheduleErrors <= 3)
+            console.warn("finish_board_poll failed", { boardId: board.id, code: error.code, message: error.message });
+        }
+      }
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-  console.log("Collection complete", stats);
+  const completedAt = new Date();
+  const claimed = queueStats();
+  console.log("Collection complete", {
+    ...stats,
+    claimed: claimed.claimed,
+    claims: claimed.claims,
+    stoppedBy: claimed.stoppedBy,
+    claimError: claimed.error,
+    scheduleErrors,
+    seconds: Math.round((completedAt.getTime() - startedAt.getTime()) / 1000),
+  });
   if (PILOT)
     console.log(
       "PILOT_SUMMARY " +
@@ -621,16 +731,139 @@ async function poll() {
           avgDescriptionChars: stats.postings ? Math.round(measure.descriptionChars / stats.postings) : 0,
         }),
     );
+  await recordPass({ runKey, startedAt, completedAt, sources, perSource, failures: measure.failures, stats });
   // Board-level failures are recorded per board (last_poll_status='error',
-  // consecutive_failures) and retried next cycle; the run itself fails only
-  // when more than a small share of boards failed, which signals a systemic
-  // problem (provider outage, database timeouts, schema mismatch).
-  const tolerated = Math.max(3, Math.floor(selected.length * 0.05));
+  // consecutive_failures, and now a backoff on next_due_at) and retried when
+  // due; the run itself fails only when more than a small share of boards
+  // failed, which signals a systemic problem (provider outage, database
+  // timeouts, schema mismatch).
+  const tolerated = Math.max(3, Math.floor((stats.completed + stats.failed) * 0.05));
   if (stats.failed > tolerated) {
     console.error(`Run failed: ${stats.failed} boards failed (tolerated ${tolerated})`);
     process.exitCode = 1;
   } else if (stats.failed) {
     console.warn(`${stats.failed} board(s) failed and will be retried next cycle`);
+  }
+}
+
+/* ---------------- pass summary (observability) ---------------- */
+
+/* Split of this pass's writes by event, read back from corpus_events over the
+ * pass window for the pass's own sources (each event row carries the listing
+ * whose source is the board's ATS; other shards' sources and the seed lists
+ * are excluded by the filter). Bounded to 100 pages of 1,000 rows; a longer
+ * window is reported as truncated. Best effort: any error leaves the split
+ * unknown and the summary falls back to the collector's own counts. */
+async function passEventCounts(sources: string[], from: Date, to: Date) {
+  const counts: Record<string, { new: number; updated: number; reopened: number; closed: number }> = {};
+  let rows = 0;
+  for (let page = 0; page < 100; page++) {
+    const { data, error } = await supabase
+      .from("corpus_events")
+      .select("event,corpus_listings!inner(source)")
+      .gte("at", from.toISOString())
+      .lte("at", to.toISOString())
+      .in("corpus_listings.source", sources)
+      .order("at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(page * 1000, page * 1000 + 999);
+    if (error) throw new Error(`corpus_events: ${error.message}`);
+    const batch = (data ?? []) as unknown as { event: string; corpus_listings: { source: string } | null }[];
+    for (const row of batch) {
+      const source = row.corpus_listings?.source;
+      if (!source) continue;
+      const tally = (counts[source] ??= { new: 0, updated: 0, reopened: 0, closed: 0 });
+      if (row.event === "new" || row.event === "updated" || row.event === "reopened" || row.event === "closed") tally[row.event]++;
+    }
+    rows += batch.length;
+    if (batch.length < 1000) return { counts, rows, truncated: false };
+  }
+  return { counts, rows, truncated: true };
+}
+
+/* One row per pass through public.record_corpus_collection_pass (created by
+ * the observability step of CP1). run_key = GitHub run id + attempt (+ shard)
+ * or a UUID for local runs; failures = {code: count}; sources = {source:
+ * {boards, failed, new, updated, reopened, closed, written}}. Never fails the
+ * pass: a missing RPC or a failed insert is a warning. */
+async function recordPass(input: {
+  runKey: string;
+  startedAt: Date;
+  completedAt: Date;
+  sources: string[];
+  perSource: Record<string, SourceTally>;
+  failures: Record<string, number>;
+  stats: { completed: number; failed: number; postings: number };
+}) {
+  try {
+    let events: Awaited<ReturnType<typeof passEventCounts>> | null = null;
+    try {
+      events = await passEventCounts(input.sources, input.startedAt, input.completedAt);
+    } catch (error) {
+      console.warn("pass summary: event split unavailable; 'new' carries every written row", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const sourcesJson: Record<string, Record<string, number>> = {};
+    const totals = { boards: 0, failed: 0, new: 0, updated: 0, reopened: 0, closed: 0, written: 0 };
+    for (const [source, tally] of Object.entries(input.perSource)) {
+      const split = events?.counts[source];
+      const row = {
+        boards: tally.boards,
+        failed: tally.failed,
+        new: split ? split.new : tally.written,
+        updated: split ? split.updated : 0,
+        reopened: split ? split.reopened : 0,
+        closed: tally.closed,
+        written: tally.written,
+      };
+      sourcesJson[source] = row;
+      totals.boards += row.boards;
+      totals.failed += row.failed;
+      totals.new += row.new;
+      totals.updated += row.updated;
+      totals.reopened += row.reopened;
+      totals.closed += row.closed;
+      totals.written += row.written;
+    }
+    console.log(
+      "PASS_SUMMARY " +
+        JSON.stringify({
+          run_key: input.runKey,
+          started_at: input.startedAt.toISOString(),
+          completed_at: input.completedAt.toISOString(),
+          ...totals,
+          postings: input.stats.postings,
+          basis: events ? "events" : "rpc-written",
+          events_truncated: events?.truncated ?? null,
+          failures: input.failures,
+          sources: sourcesJson,
+        }),
+    );
+    const { data, error } = await supabase.rpc("record_corpus_collection_pass", {
+      p_run_key: input.runKey,
+      p_started_at: input.startedAt.toISOString(),
+      p_completed_at: input.completedAt.toISOString(),
+      p_boards: totals.boards,
+      p_failed: totals.failed,
+      p_failures: input.failures,
+      p_new: totals.new,
+      p_updated: totals.updated,
+      p_closed: totals.closed,
+      p_reopened: totals.reopened,
+      p_sources: sourcesJson,
+    });
+    if (error) {
+      console.warn(
+        isMissingRpc(error)
+          ? "record_corpus_collection_pass is not available — pass summary not recorded"
+          : `record_corpus_collection_pass failed: ${error.message}`,
+      );
+      return;
+    }
+    console.log(`pass recorded: ${String(data)}`);
+  } catch (error) {
+    console.warn("pass summary failed", { message: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -694,6 +927,101 @@ async function probe(
   }
 }
 
+/* ---------------- country re-resolve (bounded backfill) ---------------- */
+
+/* Phase 1 item 1.5 (Sep 17, 2026). Existing rows only get a country when the
+ * collector rewrites them, so the third of open rows written before the label
+ * resolver existed stays unrouted. This mode walks open, publicly listed rows
+ * with no country by id in bounded pages, resolves their stored location
+ * labels with the collector's resolver and writes country_codes +
+ * country_evidence through apply_corpus_country_backfill
+ * (docs/jobs-country-backfill-2026-09-17.sql): two columns, no description,
+ * hash or snapshot rewrite; the discovery side table follows through its
+ * trigger. Dry run unless COUNTRY_BACKFILL_WRITE=1. Bounds per run:
+ * COUNTRY_BACKFILL_LIMIT rows written (default 5000), COUNTRY_BACKFILL_PAGE
+ * rows read per page (default 2000, max 5000), 200-row RPC calls with pauses.
+ * Resume with COUNTRY_BACKFILL_AFTER=<resume_after from the summary>. */
+const BACKFILL_WRITE = process.env.COUNTRY_BACKFILL_WRITE === "1";
+const BACKFILL_LIMIT = Math.max(1, Number(process.env.COUNTRY_BACKFILL_LIMIT ?? 5000) || 5000);
+const BACKFILL_PAGE = Math.min(5000, Math.max(100, Number(process.env.COUNTRY_BACKFILL_PAGE ?? 2000) || 2000));
+const BACKFILL_CHUNK = 200;
+const BACKFILL_CHUNK_PAUSE_MS = 250;
+const BACKFILL_PAGE_PAUSE_MS = 1500;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function recountry() {
+  let cursor: string | null = process.env.COUNTRY_BACKFILL_AFTER?.trim() || null;
+  const stats = {
+    write: BACKFILL_WRITE,
+    pages: 0,
+    read: 0,
+    resolvable: 0,
+    written: 0,
+    bySource: {} as Record<string, { read: number; resolvable: number }>,
+    byCountry: {} as Record<string, number>,
+    byMethod: {} as Record<string, number>,
+    byUnresolved: {} as Record<string, number>,
+  };
+  const resolvedAt = new Date().toISOString();
+  for (;;) {
+    if (BACKFILL_WRITE ? stats.written >= BACKFILL_LIMIT : stats.read >= BACKFILL_LIMIT) break;
+    let q = supabase
+      .from("corpus_listings")
+      .select("id,source,locations,country_evidence")
+      .in("status", ["active", "reopened"])
+      .eq("is_publicly_listed", true)
+      .eq("country_codes", "{}")
+      .order("id", { ascending: true })
+      .limit(BACKFILL_PAGE);
+    if (cursor) q = q.gt("id", cursor);
+    const { data, error } = await q;
+    if (error) throw new Error(`recountry read after ${cursor ?? "start"}: ${error.message}`);
+    const rows = (data ?? []) as { id: string; source: string; locations: unknown; country_evidence: Record<string, unknown> | null }[];
+    if (!rows.length) break;
+    stats.pages++;
+    stats.read += rows.length;
+    cursor = rows[rows.length - 1].id;
+    const updates: Record<string, unknown>[] = [];
+    for (const row of rows) {
+      const source = (stats.bySource[row.source] ??= { read: 0, resolvable: 0 });
+      source.read++;
+      const resolution = resolveLocationCountries(Array.isArray(row.locations) ? row.locations : []);
+      if (!resolution.countries.length) {
+        const reason = resolution.unresolved_reason ?? "unknown";
+        stats.byUnresolved[reason] = (stats.byUnresolved[reason] ?? 0) + 1;
+        continue;
+      }
+      source.resolvable++;
+      stats.resolvable++;
+      for (const code of resolution.countries) stats.byCountry[code] = (stats.byCountry[code] ?? 0) + 1;
+      const method = resolution.method ?? "unknown";
+      stats.byMethod[method] = (stats.byMethod[method] ?? 0) + 1;
+      updates.push({
+        id: row.id,
+        locations: row.locations,
+        country_codes: resolution.countries,
+        country_evidence: {
+          ...(row.country_evidence && typeof row.country_evidence === "object" ? row.country_evidence : {}),
+          ...locationCountryEvidenceFields(resolution),
+          country_backfill: { at: resolvedAt, resolver: "location-country/2026-09-17" },
+        },
+      });
+    }
+    if (BACKFILL_WRITE) {
+      for (let offset = 0; offset < updates.length && stats.written < BACKFILL_LIMIT; offset += BACKFILL_CHUNK) {
+        const chunk = updates.slice(offset, Math.min(offset + BACKFILL_CHUNK, offset + (BACKFILL_LIMIT - stats.written)));
+        const { data: applied, error: writeError } = await supabase.rpc("apply_corpus_country_backfill", { p_rows: chunk });
+        if (writeError) throw new Error(`recountry write at ${chunk[0].id}: ${writeError.message}`);
+        stats.written += Number((applied as { updated?: number } | null)?.updated ?? 0);
+        await pause(BACKFILL_CHUNK_PAUSE_MS);
+      }
+    }
+    console.log(`recountry: page ${stats.pages} read ${stats.read} resolvable ${stats.resolvable} written ${stats.written} after ${cursor}`);
+    if (rows.length < BACKFILL_PAGE) break;
+    await pause(BACKFILL_PAGE_PAUSE_MS);
+  }
+  console.log("RECOUNTRY_SUMMARY " + JSON.stringify({ ...stats, resume_after: cursor }));
+}
+
 /* ---------------- entry ---------------- */
 
 const mode = process.argv[2];
@@ -704,9 +1032,11 @@ const run =
       ? verify
       : mode === "poll"
         ? poll
-        : null;
+        : mode === "recountry"
+          ? recountry
+          : null;
 if (!run) {
-  console.error("usage: node dist/run.cjs <seed|poll|verify>");
+  console.error("usage: node dist/run.cjs <seed|poll|verify|recountry>");
   process.exit(1);
 }
 run().catch((e) => {

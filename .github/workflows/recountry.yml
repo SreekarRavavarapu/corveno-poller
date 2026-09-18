@@ -1,0 +1,43 @@
+name: Country backfill (recountry)
+# Manual, bounded backfill of country_codes/country_evidence for open rows that
+# still carry no country (Corveno jobs plan CP1 item 1.5). Dry run unless
+# `write` is true. Each run writes at most `limit` rows in 200-row RPC calls
+# through public.apply_corpus_country_backfill (two columns only). Resume from
+# the `resume_after` cursor printed by the previous run's summary.
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: "Write changes (false = dry run)"
+        type: boolean
+        default: false
+      limit:
+        description: "Maximum rows written this run"
+        type: string
+        default: "5000"
+      after:
+        description: "Resume cursor (resume_after from the previous summary)"
+        type: string
+        default: ""
+
+concurrency:
+  group: recountry
+  cancel-in-progress: false
+
+jobs:
+  recountry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Backfill countries
+        run: node dist/run.cjs recountry
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COUNTRY_BACKFILL_WRITE: ${{ inputs.write == true && '1' || '0' }}
+          COUNTRY_BACKFILL_LIMIT: ${{ inputs.limit }}
+          COUNTRY_BACKFILL_AFTER: ${{ inputs.after }}

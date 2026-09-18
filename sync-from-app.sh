@@ -8,7 +8,7 @@ mkdir -p src
 cp "$APP/scripts/corpus/run.ts" src/run.ts
 cp "$APP/scripts/corpus/primary-source.ts" src/primary-source.ts
 # Only modules the collector imports (transitively). Extend when run.ts grows.
-for f in country-evidence employment-evidence location-gazetteer location-gazetteer-data ${EXTRA_MODULES:-}; do
+for f in country-evidence employment-evidence location-gazetteer location-gazetteer-data location-country location-country-data board-scheduling ${EXTRA_MODULES:-}; do
   if [ -f "$APP/lib/corpus/$f.ts" ]; then cp "$APP/lib/corpus/$f.ts" "src/$f.ts"; fi
 done
 # ../../lib/corpus/<module> → ./<module>

@@ -46,3 +46,25 @@ Bounded rollout controls (see `.github/workflows/pilot.yml`):
 `COLLECT_TIER` (`intern-proven|harvested|all`), `COLLECT_PILOT=1` (prints a
 `PILOT_SUMMARY` JSON line with payload bytes, description sizes, typed/country
 coverage and database time).
+
+## Scheduled polling (September 2026, Phase 1 item 1.4)
+
+With migration `20260917120000_board_due_times.sql` applied, a pass no longer
+fetches every board. It claims due boards through `claim_due_boards` (a lease per
+board, owner = the pass run key, fairness round-robin across sources; inside a
+source: overdue > 2 h, intern-proven, highest change rate, most overdue) and
+reports every outcome through `finish_board_poll`, which sets the next due time:
+changed → 20 min; unchanged → ×1.5 up to 6 h; failed → 20 min × 2^failures up
+to 24 h. At the end of the pass one `PASS_SUMMARY` line is printed and
+`record_corpus_collection_pass` is called (a missing RPC is a warning).
+Without the migration the pass logs a warning and polls every board as before.
+
+`poll.yml` runs four parallel shard jobs (`COLLECT_ATS_SHARD` = `greenhouse`,
+`lever`, `ashby`, `others`), each with its own concurrency group; the wake-up
+POST runs once after all shards. Knobs (env): `COLLECT_BOARD_CAP` (boards per
+pass per shard, default 4000), `COLLECT_PASS_BUDGET_SECONDS` (stop claiming
+after this long, default 900; claimed boards still finish),
+`COLLECT_LEASE_SECONDS` (default 1800), `COLLECT_CLAIM_BATCH` (boards per claim,
+default 64), `COLLECT_ATS_SHARD` (`all`, a group name or a comma-separated
+source list). `npm test` runs the unit tests for the interval policy and the
+claim loop (`tests/`).

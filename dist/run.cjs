@@ -21592,8 +21592,58 @@ for (const [name, code] of [["United States of America", "US"], ["Great Britain"
 function explicitCountryAlias(value) {
   return typeof value === "string" ? aliases.get(normalized(value)) ?? null : null;
 }
+var shortLabels = { US: "US", USA: "US", "U.S.": "US", "U.S.A.": "US", UK: "GB", "U.K.": "GB", GB: "GB", GBR: "GB", AU: "AU", AUS: "AU", CAN: "CA", SG: "SG", SGP: "SG", JP: "JP", JPN: "JP" };
 var escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var names = [...aliases.entries()].map(([name, country]) => ({ country, pattern: new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escape(name)}(?![\\p{L}\\p{M}\\p{N}])`, "giu"), name }));
+var negative = /\b(?:not|except|excluding|excluded|outside|sauf|hors|exclu(?:e|s|es)?)\b|以外|除外|対象外|除く|不包括|不含|बाहर/iu;
+var beforeNegative = /(?:\bnot(?:\s+(?:in|within|from|available\s+in))?|\bexcept|\bexcluding|\boutside(?:\s+of)?|\bsauf|\bhors(?:\s+(?:de|du|des))?)\s+(?:the\s+)?$/iu;
+var afterNegative = /^\s*(?:is\s+|are\s+)?(?:excluded|not\s+(?:included|eligible|available)|exclu(?:e|s|es)?|以外|除外|対象外|を?除く|के\s+बाहर)/iu;
+function locationCountryEvidence(locations) {
+  const positive = /* @__PURE__ */ new Set(), excluded = /* @__PURE__ */ new Set();
+  const evidence = [];
+  for (const raw of locations) {
+    for (const segment of raw.normalize("NFKC").split(/[;,/|()（）]+/u).map((value) => value.trim()).filter(Boolean)) {
+      const hasNegative = negative.test(segment);
+      for (const { country, pattern } of names) {
+        for (const match of segment.matchAll(pattern)) {
+          const start = match.index ?? 0;
+          const denied = beforeNegative.test(segment.slice(0, start)) || afterNegative.test(segment.slice(start + match[0].length));
+          if (denied) {
+            excluded.add(country);
+            evidence.push({ country, quote: raw, polarity: "excluded" });
+          } else if (!hasNegative) {
+            positive.add(country);
+            evidence.push({ country, quote: raw, polarity: "positive" });
+          }
+        }
+      }
+      for (const [name, country] of aliases) {
+        const n = normalized(segment);
+        if (n === `${name}\u4EE5\u5916` || n === `${name}\u9664\u5916` || n === `${name}\u3092\u9664\u304F` || n === `\u4E0D\u5305\u62EC${name}` || n === `\u4E0D\u542B${name}`) {
+          excluded.add(country);
+          evidence.push({ country, quote: raw, polarity: "excluded" });
+        }
+      }
+      for (const [label2, country] of Object.entries(shortLabels)) {
+        const literal = new RegExp(`^(?:${escape(label2)}|remote\\s*[-\u2013\u2014:/]\\s*${escape(label2)}|${escape(label2)}\\s*[-\u2013\u2014:/]\\s*remote)$`, "u");
+        const remoteCaseInsensitive = new RegExp(`^remote\\s*[-\u2013\u2014:/]\\s*${escape(label2)}$`, "iu");
+        if (!hasNegative && (literal.test(segment) || remoteCaseInsensitive.test(segment))) {
+          positive.add(country);
+          evidence.push({ country, quote: raw, polarity: "positive" });
+        }
+        const mention = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escape(label2)}(?![\\p{L}\\p{M}\\p{N}])`, "gu");
+        for (const match of segment.matchAll(mention)) {
+          const start = match.index ?? 0;
+          if (beforeNegative.test(segment.slice(0, start)) || afterNegative.test(segment.slice(start + match[0].length))) {
+            excluded.add(country);
+            evidence.push({ country, quote: raw, polarity: "excluded" });
+          }
+        }
+      }
+    }
+  }
+  return { countries: [...positive].filter((country) => !excluded.has(country)), excludedCountries: [...excluded], evidence };
+}
 
 // src/primary-source.ts
 var PRIMARY_ATS = [
@@ -21767,6 +21817,15 @@ function unzonedDate(v) {
     typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(v.trim()) ? `${v.trim()}Z` : v
   );
 }
+function postedPrecision(raw, iso) {
+  if (iso === null) return "unknown";
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return "date";
+    if (/^\d{4}-\d{2}-\d{2}T00:00(?::00(?:\.0+)?)?$/.test(value)) return "date";
+  }
+  return "timestamp";
+}
 function identity(v) {
   return typeof v === "string" ? v : typeof v === "number" && Number.isSafeInteger(v) ? String(v) : null;
 }
@@ -21785,9 +21844,11 @@ function employmentType(value) {
     apprenticeship: "apprenticeship",
     research: "research",
     // Compound provider codes (Recruitee `employment_type_code`) and
-    // labels used by the feeds authorised 2026-09-16. Fixed-term work is
-    // a contract, seasonal/temp work is temporary, freelance is contract —
-    // the same reading as employmentTypeFromLabel in employment-evidence.
+    // labels used by the feeds authorised 2026-09-16. Owner decision
+    // (Sep 16, 2026): a fixed-term role keeps its hours commitment
+    // (full-time or part-time) so full-time searches still see it; the raw
+    // label stays on the record (structuredType) as the fixed-term flag.
+    // Seasonal/temp work is temporary, freelance is contract.
     fulltimepermanent: "full_time",
     parttimepermanent: "part_time",
     fulltimefixedterm: "full_time",
@@ -21843,6 +21904,7 @@ function extract(ats, j) {
     countryFields: [],
     structuredType: null,
     posted_at: null,
+    posted_raw: null,
     updated_at: date(j.updated_at),
     listed: true,
     remote: { workplaceType: j.workplaceType, isRemote: j.isRemote }
@@ -21854,7 +21916,10 @@ function extract(ats, j) {
         url: text(j.absolute_url),
         description: text(j.content) !== null ? plainText(j.content) : null,
         locationFields: [{ path: "location.name", raw: object(j.location).name }],
-        posted_at: date(j.first_published)
+        // first_published is the posting time; updated_at (base) is the
+        // provider's edit time and stays separate as updated_at_source.
+        posted_at: date(j.first_published),
+        posted_raw: j.first_published
       };
     case "lever": {
       if (j.lists !== void 0 && (!Array.isArray(j.lists) || j.lists.some(
@@ -21877,7 +21942,12 @@ function extract(ats, j) {
         ],
         countryFields: [{ path: "country", raw: j.country }],
         structuredType: text(cats.commitment),
-        posted_at: date(j.createdAt)
+        // createdAt is the posting time; updatedAt is the provider's edit time
+        // (263 rows were first seen before their stated posting time when the
+        // two were conflated) and is stored separately as updated_at_source.
+        posted_at: date(j.createdAt),
+        posted_raw: j.createdAt,
+        updated_at: date(j.updatedAt)
       };
     }
     case "ashby":
@@ -21903,6 +21973,7 @@ function extract(ats, j) {
         ],
         structuredType: text(j.employmentType),
         posted_at: date(j.publishedAt),
+        posted_raw: j.publishedAt,
         listed: j.isListed !== false
       };
     case "recruitee": {
@@ -21921,6 +21992,7 @@ function extract(ats, j) {
         ],
         structuredType: label(j.employment_type_code),
         posted_at: date(j.published_at),
+        posted_raw: j.published_at,
         remote: { isRemote: typeof j.remote === "boolean" ? j.remote : void 0 }
       };
     }
@@ -21937,7 +22009,9 @@ function extract(ats, j) {
           ...locations.map((l, i) => ({ path: `locations[${i}].countryCode`, raw: l.countryCode }))
         ],
         structuredType: label(j.employment_type),
+        // published_on is a calendar date ("2026-02-12"): precision 'date'.
         posted_at: date(label(j.published_on)),
+        posted_raw: label(j.published_on),
         updated_at: null,
         remote: { isRemote: typeof j.telecommuting === "boolean" ? j.telecommuting : void 0 }
       };
@@ -21961,6 +22035,7 @@ function extract(ats, j) {
         ],
         structuredType: label(object(j.type).name) ?? label(object(j.type).id),
         posted_at: date(j.published_date),
+        posted_raw: j.published_date,
         updated_at: null,
         remote: { isRemote: typeof primary.is_remote === "boolean" ? primary.is_remote : void 0 }
       };
@@ -21987,6 +22062,7 @@ function extract(ats, j) {
         ],
         structuredType: label(j.employment_type) ?? label(j.employment_type_text),
         posted_at: date(label(j.published_at)),
+        posted_raw: label(j.published_at),
         updated_at: null,
         remote: { workplaceType: j.workplace_type }
       };
@@ -22002,6 +22078,7 @@ function extract(ats, j) {
         countryFields: places.map((p, i) => ({ path: `_jobposting.jobLocation[${i}].address.addressCountry`, raw: object(p.address).addressCountry })),
         structuredType: label(posting.employmentType),
         posted_at: date(j.date_published) ?? date(posting.datePosted),
+        posted_raw: date(j.date_published) !== null ? j.date_published : posting.datePosted,
         updated_at: date(j.date_modified),
         remote: { isRemote: posting.jobLocationType === "TELECOMMUTE" ? true : void 0 }
       };
@@ -22030,6 +22107,7 @@ function extract(ats, j) {
         countryFields: locations.map((l, i) => ({ path: `PositionLocation[${i}].CountryCode`, raw: l.CountryCode })),
         structuredType: typeLabels.find((v) => employmentType(v)) ?? typeLabels[0] ?? null,
         posted_at: unzonedDate(d.PublicationStartDate),
+        posted_raw: d.PublicationStartDate,
         updated_at: null,
         remote: { isRemote: details.RemoteIndicator === true ? true : void 0 }
       };
@@ -22087,6 +22165,7 @@ function normalizeJob(ats, slug, raw) {
       )
     ],
     posted_at: x.posted_at,
+    posted_precision: postedPrecision(x.posted_raw, x.posted_at),
     updated_at: x.updated_at,
     structuredType: x.structuredType,
     structured_job_type: employmentType(x.structuredType),
@@ -22192,7 +22271,8 @@ function parseBoardResponse(ats, slug, data) {
 var dnsLabel = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 var hostName = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 function boardUrl(ats, slug, eu = false) {
-  if (!/^[A-Za-z0-9_.-]{1,200}$/.test(slug))
+  const slugPattern = ats === "ashby" ? /^[A-Za-z0-9_.-](?:[A-Za-z0-9_. -]{0,198}[A-Za-z0-9_.-])?$/ : /^[A-Za-z0-9_.-]{1,200}$/;
+  if (!slugPattern.test(slug))
     throw new CollectionError("INVALID_BOARD");
   const board = encodeURIComponent(slug);
   switch (ats) {
@@ -22775,6 +22855,7 @@ var gazetteerSource = {
       "Los Angeles",
       "Chicago",
       "Houston",
+      "SF",
       "Phoenix",
       "Philadelphia",
       "San Antonio",
@@ -25435,6 +25516,7 @@ var gazetteerModifiers = {
   Malvern: { ambiguous: true, note: "US (PA), AU (VIC), GB (Worcestershire)" },
   Terai: { ambiguous: true, alsoCountries: ["NP"] },
   // Ordinary words: only a complete segment can be a place.
+  SF: { wholeSegmentOnly: true, note: "San Francisco shorthand; only as a complete segment" },
   Sterling: { wholeSegmentOnly: true },
   Mobile: { wholeSegmentOnly: true },
   Bend: { wholeSegmentOnly: true },
@@ -25569,6 +25651,2392 @@ var countryCollisionCodes = {
   CA: { region: "US", country: "CA" },
   IN: { region: "US", country: "IN" }
 };
+var anchorOnlyCities = {
+  US: [
+    // California
+    "Hawthorne",
+    "El Segundo",
+    "Garden Grove",
+    "Beverly Hills",
+    "San Leandro",
+    "Cerritos",
+    "West Covina",
+    "Montebello",
+    "Canoga Park",
+    "San Rafael",
+    "Rocklin",
+    "Carson",
+    "Corona",
+    "Gardena",
+    "Westlake Village",
+    "Northridge",
+    "West Hollywood",
+    "Rancho Mirage",
+    "Encino",
+    "Sutter Creek",
+    "Santee",
+    "Felton",
+    "Colma",
+    "Valencia",
+    "Fulton",
+    "Antioch",
+    "Menifee|Manifee",
+    "Mira Loma",
+    "Montclair",
+    "Palm Desert",
+    "Oakdale",
+    "Compton",
+    "Lawndale",
+    "Fullerton",
+    "Wasco",
+    "Tracy",
+    "Manteca",
+    "Lodi",
+    "Turlock",
+    "Merced",
+    "Visalia",
+    "Tulare",
+    "Hanford",
+    "Porterville",
+    "Delano",
+    "Clovis",
+    "Madera",
+    "Salinas",
+    "Watsonville",
+    "Gilroy",
+    "Morgan Hill",
+    "Hollister",
+    "Seaside",
+    "Marina",
+    "Pacific Grove",
+    "Carmel",
+    "Paso Robles",
+    "Atascadero",
+    "Lompoc",
+    "Santa Maria",
+    "Goleta",
+    "Carpinteria",
+    "Camarillo",
+    "Moorpark",
+    "Agoura Hills",
+    "Calabasas",
+    "Malibu",
+    "Woodland Hills",
+    "Sherman Oaks",
+    "Studio City",
+    "North Hollywood",
+    "Van Nuys",
+    "Chatsworth",
+    "Sylmar",
+    "San Fernando",
+    "Sun Valley",
+    "Panorama City",
+    "Reseda",
+    "Tarzana",
+    "Granada Hills",
+    "Porter Ranch",
+    "Santa Clarita",
+    "Palmdale",
+    "Lancaster",
+    "Victorville",
+    "Hesperia",
+    "Apple Valley",
+    "Barstow",
+    "Ridgecrest",
+    "China Lake",
+    "Edwards|Edwards AFB|Edwards Air Force Base",
+    "Vandenberg|Vandenberg AFB|Vandenberg SFB",
+    "Point Mugu",
+    "Port Hueneme",
+    "Camp Pendleton",
+    "Twentynine Palms",
+    "Fort Irwin",
+    "Travis AFB|Travis Air Force Base",
+    "Beale AFB",
+    "Downey",
+    "Norwalk",
+    "Whittier",
+    "La Mirada",
+    "La Habra",
+    "Brea",
+    "Yorba Linda",
+    "Placentia",
+    "Orange",
+    "Tustin",
+    "Costa Mesa",
+    "Newport Beach",
+    "Laguna Beach",
+    "Laguna Hills",
+    "Laguna Niguel",
+    "Aliso Viejo",
+    "Mission Viejo",
+    "Lake Forest",
+    "Rancho Santa Margarita",
+    "San Clemente",
+    "San Juan Capistrano",
+    "Dana Point",
+    "Fountain Valley",
+    "Westminster",
+    "Seal Beach",
+    "Los Alamitos",
+    "Cypress",
+    "Stanton",
+    "Buena Park",
+    "La Palma",
+    "Lakewood",
+    "Bellflower",
+    "Paramount",
+    "Lynwood",
+    "South Gate",
+    "Huntington Park",
+    "Cudahy",
+    "Maywood",
+    "Vernon",
+    "Commerce",
+    "Pico Rivera",
+    "Santa Fe Springs",
+    "Industry|City of Industry",
+    "Walnut",
+    "Diamond Bar",
+    "Pomona",
+    "Claremont",
+    "La Verne",
+    "San Dimas",
+    "Glendora",
+    "Azusa",
+    "Covina",
+    "Baldwin Park",
+    "El Monte",
+    "South El Monte",
+    "Rosemead",
+    "San Gabriel",
+    "Alhambra",
+    "Monterey Park",
+    "Arcadia",
+    "Monrovia",
+    "Duarte",
+    "Sierra Madre",
+    "South Pasadena",
+    "San Marino",
+    "Temple City",
+    "La Canada Flintridge|La Ca\xF1ada Flintridge",
+    "Altadena",
+    "Inglewood",
+    "Manhattan Beach",
+    "Hermosa Beach",
+    "Redondo Beach",
+    "Palos Verdes",
+    "Rancho Palos Verdes",
+    "Rolling Hills Estates",
+    "San Pedro",
+    "Wilmington",
+    "Harbor City",
+    "Marina del Rey",
+    "Playa Vista",
+    "Playa del Rey",
+    "Venice",
+    "Westwood",
+    "Century City",
+    "Brentwood",
+    "Pacific Palisades",
+    "Bel Air",
+    "Mid-Wilshire|Miracle Mile",
+    "Koreatown",
+    "Downtown Los Angeles|DTLA",
+    "Echo Park",
+    "Silver Lake",
+    "Los Feliz",
+    "Eagle Rock",
+    "Highland Park",
+    "Glassell Park",
+    "Boyle Heights",
+    "El Sereno",
+    "Lincoln Heights",
+    "Montecito Heights",
+    "Monterey Hills",
+    "Ontario",
+    "Rancho Cucamonga",
+    "Upland",
+    "Fontana",
+    "Rialto",
+    "Colton",
+    "Loma Linda",
+    "Redlands",
+    "Yucaipa",
+    "Highland",
+    "Chino",
+    "Chino Hills",
+    "Eastvale",
+    "Norco",
+    "Jurupa Valley",
+    "Moreno Valley",
+    "Perris",
+    "Hemet",
+    "San Jacinto",
+    "Beaumont",
+    "Banning",
+    "Murrieta",
+    "Temecula",
+    "Lake Elsinore",
+    "Wildomar",
+    "Palm Springs",
+    "Cathedral City",
+    "La Quinta",
+    "Indio",
+    "Coachella",
+    "Indian Wells",
+    "Desert Hot Springs",
+    "Blythe",
+    "El Centro",
+    "Calexico",
+    "Brawley",
+    "Imperial",
+    "Yuma",
+    "National City",
+    "Imperial Beach",
+    "Coronado",
+    "Lemon Grove",
+    "La Mesa",
+    "El Cajon",
+    "Spring Valley",
+    "Poway",
+    "Rancho Bernardo",
+    "Rancho Santa Fe",
+    "Solana Beach",
+    "Del Mar",
+    "Encinitas",
+    "San Marcos",
+    "Vista",
+    "Fallbrook",
+    "Ramona",
+    "Alpine",
+    "Sorrento Valley",
+    "Mira Mesa",
+    "Kearny Mesa",
+    "Miramar",
+    "Point Loma",
+    "Mission Valley",
+    "Otay Mesa",
+    "San Ysidro",
+    "Bonita",
+    "Sunnyvale",
+    "Saratoga",
+    "Los Altos",
+    "Los Altos Hills",
+    "Portola Valley",
+    "Woodside",
+    "Atherton",
+    "Belmont",
+    "San Carlos",
+    "Half Moon Bay",
+    "Pacifica",
+    "Daly City",
+    "South San Francisco",
+    "San Bruno",
+    "Millbrae",
+    "Hillsborough",
+    "East Palo Alto",
+    "Stanford",
+    "Santa Clara",
+    "Morgan Hill",
+    "Scotts Valley",
+    "Capitola",
+    "Aptos",
+    "Soquel",
+    "Boulder Creek",
+    "Ben Lomond",
+    "Fremont",
+    "Newark",
+    "Union City",
+    "Hayward",
+    "Castro Valley",
+    "San Lorenzo",
+    "Dublin",
+    "Pleasanton",
+    "Livermore",
+    "Danville",
+    "San Ramon",
+    "Alamo",
+    "Lafayette",
+    "Orinda",
+    "Moraga",
+    "Walnut Creek",
+    "Pleasant Hill",
+    "Martinez",
+    "Concord",
+    "Clayton",
+    "Pittsburg",
+    "Antioch",
+    "Brentwood",
+    "Oakley",
+    "Discovery Bay",
+    "Richmond",
+    "El Cerrito",
+    "Albany",
+    "Piedmont",
+    "Emeryville",
+    "Alameda",
+    "San Leandro",
+    "Hercules",
+    "Pinole",
+    "San Pablo",
+    "Benicia",
+    "Vallejo",
+    "Fairfield",
+    "Vacaville",
+    "Suisun City",
+    "Dixon",
+    "Rio Vista",
+    "Novato",
+    "Petaluma",
+    "Rohnert Park",
+    "Cotati",
+    "Sebastopol",
+    "Healdsburg",
+    "Windsor",
+    "Sonoma",
+    "Napa",
+    "American Canyon",
+    "St Helena|Saint Helena",
+    "Calistoga",
+    "Yountville",
+    "Mill Valley",
+    "Sausalito",
+    "Tiburon",
+    "Larkspur",
+    "Corte Madera",
+    "San Anselmo",
+    "Fairfax",
+    "Point Reyes",
+    "Bodega Bay",
+    "Fort Bragg",
+    "Ukiah",
+    "Willits",
+    "Lakeport",
+    "Clearlake",
+    "Eureka",
+    "Arcata",
+    "Crescent City",
+    "Yreka",
+    "Mount Shasta",
+    "Redding",
+    "Anderson",
+    "Red Bluff",
+    "Chico",
+    "Paradise",
+    "Oroville",
+    "Yuba City",
+    "Marysville",
+    "Grass Valley",
+    "Nevada City",
+    "Auburn",
+    "Roseville",
+    "Rocklin",
+    "Lincoln",
+    "Loomis",
+    "Folsom",
+    "El Dorado Hills",
+    "Placerville",
+    "South Lake Tahoe",
+    "Truckee",
+    "Tahoe City",
+    "Elk Grove",
+    "Rancho Cordova",
+    "Citrus Heights",
+    "Carmichael",
+    "Fair Oaks",
+    "Orangevale",
+    "Galt",
+    "Woodland",
+    "West Sacramento",
+    "Davis",
+    "Dixon",
+    "Winters",
+    "Stockton",
+    "Lathrop",
+    "Ripon",
+    "Escalon",
+    "Modesto",
+    "Ceres",
+    "Riverbank",
+    "Patterson",
+    "Newman",
+    "Gustine",
+    "Los Banos",
+    "Atwater",
+    "Livingston",
+    "Chowchilla",
+    "Fresno",
+    "Kingsburg",
+    "Selma",
+    "Reedley",
+    "Sanger",
+    "Dinuba",
+    "Lemoore",
+    "Coalinga",
+    "Avenal",
+    "Taft",
+    "Tehachapi",
+    "Arvin",
+    "Shafter",
+    "McFarland",
+    "Mojave",
+    "California City",
+    "Bishop",
+    "Mammoth Lakes",
+    "Big Bear Lake",
+    "Lake Arrowhead",
+    "Crestline",
+    "Joshua Tree",
+    "Yucca Valley",
+    "Needles",
+    "Big Sur",
+    "Morro Bay",
+    "Pismo Beach",
+    "Arroyo Grande",
+    "Grover Beach",
+    "Nipomo",
+    "Solvang",
+    "Buellton",
+    "Ojai",
+    "Fillmore",
+    "Santa Paula",
+    "Simi Valley",
+    "Thousand Oaks",
+    "Newbury Park",
+    "Oak Park",
+    "Stevenson Ranch",
+    "Castaic",
+    "Canyon Country",
+    "Newhall",
+    "Saugus",
+    "Acton",
+    "Agua Dulce",
+    "Lake Los Angeles",
+    "Littlerock",
+    "Quartz Hill",
+    "Rosamond",
+    "Lancaster",
+    // Massachusetts
+    "Woburn",
+    "Norfolk",
+    "Danvers",
+    "Randolph",
+    "Lynn",
+    "Boxborough",
+    "North Falmouth",
+    "Dunstable",
+    "Dartmouth",
+    "North Dartmouth",
+    "Wilmington",
+    "Burlington",
+    "Bedford",
+    "Lexington",
+    "Concord",
+    "Acton",
+    "Littleton",
+    "Westford",
+    "Chelmsford",
+    "Billerica",
+    "Tewksbury",
+    "Andover",
+    "North Andover",
+    "Lawrence",
+    "Methuen",
+    "Haverhill",
+    "Amesbury",
+    "Newburyport",
+    "Ipswich",
+    "Gloucester",
+    "Rockport",
+    "Beverly",
+    "Salem",
+    "Marblehead",
+    "Swampscott",
+    "Saugus",
+    "Revere",
+    "Chelsea",
+    "Everett",
+    "Malden",
+    "Melrose",
+    "Stoneham",
+    "Wakefield",
+    "Reading",
+    "North Reading",
+    "Winchester",
+    "Arlington",
+    "Belmont",
+    "Watertown",
+    "Waltham",
+    "Newton",
+    "Wellesley",
+    "Needham",
+    "Dedham",
+    "Westwood",
+    "Norwood",
+    "Canton",
+    "Sharon",
+    "Stoughton",
+    "Brockton",
+    "Bridgewater",
+    "Taunton",
+    "Attleboro",
+    "North Attleborough",
+    "Mansfield",
+    "Foxborough|Foxboro",
+    "Franklin",
+    "Bellingham",
+    "Milford",
+    "Hopkinton",
+    "Ashland",
+    "Framingham",
+    "Natick",
+    "Sudbury",
+    "Wayland",
+    "Weston",
+    "Lincoln",
+    "Maynard",
+    "Hudson",
+    "Marlborough",
+    "Southborough",
+    "Northborough",
+    "Westborough",
+    "Shrewsbury",
+    "Grafton",
+    "Millbury",
+    "Auburn",
+    "Leicester",
+    "Spencer",
+    "Leominster",
+    "Fitchburg",
+    "Gardner",
+    "Athol",
+    "Greenfield",
+    "Northampton",
+    "Easthampton",
+    "Amherst",
+    "Hadley",
+    "South Hadley",
+    "Holyoke",
+    "Chicopee",
+    "Westfield",
+    "West Springfield",
+    "Agawam",
+    "Longmeadow",
+    "East Longmeadow",
+    "Ludlow",
+    "Wilbraham",
+    "Palmer",
+    "Ware",
+    "Pittsfield",
+    "North Adams",
+    "Williamstown",
+    "Lenox",
+    "Lee",
+    "Great Barrington",
+    "Quincy",
+    "Braintree",
+    "Weymouth",
+    "Hingham",
+    "Hull",
+    "Cohasset",
+    "Scituate",
+    "Marshfield",
+    "Duxbury",
+    "Kingston",
+    "Plymouth",
+    "Carver",
+    "Wareham",
+    "Bourne",
+    "Sandwich",
+    "Mashpee",
+    "Falmouth",
+    "Barnstable",
+    "Hyannis",
+    "Yarmouth",
+    "Dennis",
+    "Harwich",
+    "Chatham",
+    "Orleans",
+    "Eastham",
+    "Wellfleet",
+    "Provincetown",
+    "Nantucket",
+    "Edgartown",
+    "Oak Bluffs",
+    "Vineyard Haven",
+    "New Bedford",
+    "Fairhaven",
+    "Fall River",
+    "Somerset",
+    "Swansea",
+    "Seekonk",
+    "Rehoboth",
+    "Dighton",
+    "Berkley",
+    "Raynham",
+    "Easton",
+    "Norton",
+    "Wrentham",
+    "Plainville",
+    "Medway",
+    "Millis",
+    "Medfield",
+    "Walpole",
+    "Holliston",
+    "Hanscom AFB|Hanscom Air Force Base",
+    "Devens",
+    "Fort Devens",
+    "Milton",
+    "Quincy",
+    "Charlestown",
+    "Dorchester",
+    "Roxbury",
+    "Jamaica Plain",
+    "Allston",
+    "Back Bay",
+    "Seaport",
+    "South Boston",
+    "East Boston",
+    "Brighton",
+    "Kendall Square",
+    "Harvard Square",
+    // Illinois
+    "Scott AFB|Scott Air Force Base",
+    "Hoffman Estates",
+    "Niles",
+    "University Park",
+    "Litchfield",
+    "Northbrook",
+    "Glenwood",
+    "Oak Brook",
+    "Deerfield",
+    "Lake Forest",
+    "Libertyville",
+    "Vernon Hills",
+    "Mundelein",
+    "Gurnee",
+    "Waukegan",
+    "North Chicago",
+    "Great Lakes",
+    "Highland Park",
+    "Glenview",
+    "Wilmette",
+    "Winnetka",
+    "Kenilworth",
+    "Skokie",
+    "Morton Grove",
+    "Park Ridge",
+    "Des Plaines",
+    "Mount Prospect",
+    "Arlington Heights",
+    "Rolling Meadows",
+    "Palatine",
+    "Barrington",
+    "Elk Grove Village",
+    "Itasca",
+    "Wood Dale",
+    "Bensenville",
+    "Addison",
+    "Lombard",
+    "Glen Ellyn",
+    "Wheaton",
+    "Warrenville",
+    "Downers Grove",
+    "Westmont",
+    "Hinsdale",
+    "Western Springs",
+    "La Grange",
+    "Brookfield",
+    "Oak Park",
+    "River Forest",
+    "Forest Park",
+    "Elmwood Park",
+    "Franklin Park",
+    "Melrose Park",
+    "Maywood",
+    "Bellwood",
+    "Hillside",
+    "Westchester",
+    "Broadview",
+    "Berwyn",
+    "Cicero",
+    "Oak Lawn",
+    "Burbank",
+    "Bridgeview",
+    "Orland Park",
+    "Tinley Park",
+    "Oak Forest",
+    "Homewood",
+    "Flossmoor",
+    "Matteson",
+    "Frankfort",
+    "Mokena",
+    "New Lenox",
+    "Joliet",
+    "Romeoville",
+    "Bolingbrook",
+    "Plainfield",
+    "Lockport",
+    "Lemont",
+    "Woodridge",
+    "Lisle",
+    "Naperville",
+    "Aurora",
+    "North Aurora",
+    "Batavia",
+    "Geneva",
+    "St Charles|Saint Charles",
+    "Elgin",
+    "South Elgin",
+    "Carpentersville",
+    "Algonquin",
+    "Lake in the Hills",
+    "Crystal Lake",
+    "McHenry",
+    "Woodstock",
+    "Huntley",
+    "Hampshire",
+    "DeKalb",
+    "Sycamore",
+    "Rockford",
+    "Loves Park",
+    "Machesney Park",
+    "Belvidere",
+    "Freeport",
+    "Dixon",
+    "Sterling",
+    "Rock Falls",
+    "Moline",
+    "East Moline",
+    "Rock Island",
+    "Galesburg",
+    "Macomb",
+    "Quincy",
+    "Peoria",
+    "East Peoria",
+    "Pekin",
+    "Morton",
+    "Washington",
+    "Normal",
+    "Decatur",
+    "Champaign",
+    "Urbana",
+    "Danville",
+    "Mattoon",
+    "Charleston",
+    "Effingham",
+    "Carbondale",
+    "Marion",
+    "Mount Vernon",
+    "Centralia",
+    "Belleville",
+    "Fairview Heights",
+    "O'Fallon|OFallon",
+    "Collinsville",
+    "Edwardsville",
+    "Glen Carbon",
+    "Granite City",
+    "Alton",
+    "Godfrey",
+    "Jacksonville",
+    "Springfield",
+    "Chatham",
+    "Taylorville",
+    "Lincoln",
+    "Bloomington",
+    "Kankakee",
+    "Bourbonnais",
+    "Bradley",
+    "Ottawa",
+    "LaSalle",
+    "Peru",
+    "Streator",
+    "Morris",
+    "Yorkville",
+    "Oswego",
+    "Montgomery",
+    "Sugar Grove",
+    "West Chicago",
+    "Winfield",
+    "Carol Stream",
+    "Bloomingdale",
+    "Roselle",
+    "Schaumburg",
+    "Streamwood",
+    "Hanover Park",
+    "Bartlett",
+    "Elmhurst",
+    "Villa Park",
+    "Oakbrook Terrace",
+    "Darien",
+    "Willowbrook",
+    "Burr Ridge",
+    "Countryside",
+    "Justice",
+    "Summit",
+    "Alsip",
+    "Blue Island",
+    "Calumet City",
+    "Lansing",
+    "Chicago Heights",
+    "Park Forest",
+    "Crete",
+    "Beecher",
+    "Peotone",
+    "Manteno",
+    "Rosemont",
+    "Schiller Park",
+    "Harwood Heights",
+    "Norridge",
+    "Lincolnwood",
+    "Evanston",
+    "Round Lake",
+    "Grayslake",
+    "Lake Zurich",
+    "Wauconda",
+    "Island Lake",
+    "Fox Lake",
+    "Antioch",
+    "Zion",
+    "Lindenhurst",
+    "Lake Villa",
+    "Lake Bluff",
+    "Highwood",
+    "Bannockburn",
+    "Riverwoods",
+    "Lincolnshire",
+    "Buffalo Grove",
+    "Wheeling",
+    "Prospect Heights",
+    "Northfield",
+    "Golf",
+    // Maryland
+    "Laurel",
+    "Lanham",
+    "Hagerstown",
+    "Morganza",
+    "Taneytown",
+    "Sandy Spring",
+    "Savage",
+    "Lusby",
+    "Huntingtown",
+    "Hunt Valley",
+    "Cockeysville",
+    "Timonium",
+    "Lutherville",
+    "Owings Mills",
+    "Pikesville",
+    "Reisterstown",
+    "Glen Burnie",
+    "Linthicum",
+    "Odenton",
+    "Severn",
+    "Severna Park",
+    "Arnold",
+    "Crofton",
+    "Gambrills",
+    "Millersville",
+    "Pasadena",
+    "Fort Meade|Fort George G Meade|Ft Meade",
+    "Columbia",
+    "Ellicott City",
+    "Elkridge",
+    "Jessup",
+    "Catonsville",
+    "Woodlawn",
+    "Windsor Mill",
+    "Randallstown",
+    "Owings Mills",
+    "Dundalk",
+    "Essex",
+    "Middle River",
+    "White Marsh",
+    "Nottingham",
+    "Perry Hall",
+    "Parkville",
+    "Carney",
+    "Bel Air",
+    "Abingdon",
+    "Edgewood",
+    "Aberdeen",
+    "Aberdeen Proving Ground|APG",
+    "Havre de Grace",
+    "Elkton",
+    "Chestertown",
+    "Easton",
+    "Cambridge",
+    "Salisbury",
+    "Ocean City",
+    "Princess Anne",
+    "Pocomoke City",
+    "Waldorf",
+    "La Plata",
+    "Indian Head",
+    "Lexington Park",
+    "Patuxent River|Pax River|NAS Patuxent River",
+    "California",
+    "Leonardtown",
+    "Prince Frederick",
+    "Solomons",
+    "Upper Marlboro",
+    "Largo",
+    "Bowie",
+    "Greenbelt",
+    "College Park",
+    "Hyattsville",
+    "Riverdale",
+    "Beltsville",
+    "Adelphi",
+    "Takoma Park",
+    "Silver Spring",
+    "Wheaton",
+    "Kensington",
+    "Chevy Chase",
+    "Potomac",
+    "North Bethesda",
+    "Gaithersburg",
+    "Germantown",
+    "Clarksburg",
+    "Damascus",
+    "Olney",
+    "Brookeville",
+    "Ashton",
+    "Burtonsville",
+    "Frederick",
+    "Fort Detrick",
+    "Walkersville",
+    "Thurmont",
+    "Emmitsburg",
+    "Brunswick",
+    "Mount Airy",
+    "Westminster",
+    "Eldersburg",
+    "Sykesville",
+    "Finksburg",
+    "Hampstead",
+    "Manchester",
+    "Cumberland",
+    "Frostburg",
+    "Oakland",
+    "Andrews AFB|Joint Base Andrews",
+    "Suitland",
+    "Camp Springs",
+    "Clinton",
+    "Fort Washington",
+    "Oxon Hill",
+    "National Harbor",
+    "Capitol Heights",
+    "Landover",
+    "Glenarden",
+    "New Carrollton",
+    "Seabrook",
+    "Glenn Dale",
+    "Mitchellville",
+    "Annapolis Junction",
+    "Curtis Bay",
+    // Indiana
+    "Crane",
+    "Greenfield",
+    "Evansville",
+    "Plainfield",
+    "Lafayette",
+    "West Lafayette",
+    "Chesterton",
+    "Batesville",
+    "Carmel",
+    "Fishers",
+    "Noblesville",
+    "Westfield",
+    "Zionsville",
+    "Brownsburg",
+    "Avon",
+    "Danville",
+    "Greenwood",
+    "Franklin",
+    "Whiteland",
+    "Shelbyville",
+    "Columbus",
+    "Seymour",
+    "Bedford",
+    "Bloomington",
+    "Martinsville",
+    "Mooresville",
+    "Anderson",
+    "Muncie",
+    "New Castle",
+    "Richmond",
+    "Connersville",
+    "Kokomo",
+    "Logansport",
+    "Peru",
+    "Marion",
+    "Wabash",
+    "Huntington",
+    "Warsaw",
+    "Goshen",
+    "Elkhart",
+    "South Bend",
+    "Mishawaka",
+    "Granger",
+    "La Porte|LaPorte",
+    "Michigan City",
+    "Valparaiso",
+    "Portage",
+    "Hobart",
+    "Merrillville",
+    "Crown Point",
+    "Schererville",
+    "Highland",
+    "Griffith",
+    "Hammond",
+    "East Chicago",
+    "Gary",
+    "Whiting",
+    "Lowell",
+    "Rensselaer",
+    "Monticello",
+    "Frankfort",
+    "Lebanon",
+    "Crawfordsville",
+    "Terre Haute",
+    "Vincennes",
+    "Washington",
+    "Jasper",
+    "Huntingburg",
+    "Tell City",
+    "Boonville",
+    "Newburgh",
+    "Princeton",
+    "Mount Vernon",
+    "New Albany",
+    "Jeffersonville",
+    "Clarksville",
+    "Sellersburg",
+    "Madison",
+    "Scottsburg",
+    "North Vernon",
+    "Greensburg",
+    "Rushville",
+    "Tipton",
+    "Elwood",
+    "Alexandria",
+    "Hartford City",
+    "Portland",
+    "Decatur",
+    "Bluffton",
+    "Auburn",
+    "Kendallville",
+    "Angola",
+    "Columbia City",
+    "Plymouth",
+    "Rochester",
+    "Nappanee",
+    "Wakarusa",
+    "Speedway",
+    "Beech Grove",
+    "Lawrence",
+    "Southport",
+    "Whitestown",
+    "Lebanon",
+    "Pendleton",
+    "Fortville",
+    "McCordsville",
+    "New Palestine",
+    "Greencastle",
+    "Brazil",
+    "Linton",
+    "Sullivan",
+    "Bicknell",
+    "Salem",
+    "Corydon",
+    "Charlestown",
+    // Colorado
+    "Littleton",
+    "Broomfield",
+    "Lone Tree",
+    "La Salle",
+    "Wiggins",
+    "Englewood",
+    "Centennial",
+    "Highlands Ranch",
+    "Castle Rock",
+    "Castle Pines",
+    "Parker",
+    "Greenwood Village",
+    "Cherry Hills Village",
+    "Sheridan",
+    "Bow Mar",
+    "Columbine",
+    "Ken Caryl",
+    "Lakewood",
+    "Golden",
+    "Wheat Ridge",
+    "Arvada",
+    "Westminster",
+    "Northglenn",
+    "Thornton",
+    "Commerce City",
+    "Brighton",
+    "Henderson",
+    "Lochbuie",
+    "Federal Heights",
+    "Superior",
+    "Louisville",
+    "Lafayette",
+    "Erie",
+    "Longmont",
+    "Niwot",
+    "Lyons",
+    "Nederland",
+    "Estes Park",
+    "Loveland",
+    "Berthoud",
+    "Johnstown",
+    "Milliken",
+    "Windsor",
+    "Greeley",
+    "Evans",
+    "Eaton",
+    "Ault",
+    "Wellington",
+    "Timnath",
+    "Severance",
+    "Firestone",
+    "Frederick",
+    "Dacono",
+    "Mead",
+    "Fort Lupton",
+    "Hudson",
+    "Keenesburg",
+    "Brush",
+    "Fort Morgan",
+    "Sterling",
+    "Yuma",
+    "Holyoke",
+    "Julesburg",
+    "Burlington",
+    "Limon",
+    "Castle Rock",
+    "Monument",
+    "Palmer Lake",
+    "Woodland Park",
+    "Cripple Creek",
+    "Manitou Springs",
+    "Fountain",
+    "Security-Widefield|Security",
+    "Peterson AFB|Peterson SFB|Peterson Space Force Base",
+    "Schriever AFB|Schriever SFB|Schriever Space Force Base",
+    "Fort Carson",
+    "Cheyenne Mountain",
+    "Buckley AFB|Buckley SFB",
+    "Pueblo",
+    "Pueblo West",
+    "Canon City|Ca\xF1on City",
+    "Florence",
+    "Salida",
+    "Buena Vista",
+    "Leadville",
+    "Fairplay",
+    "Breckenridge",
+    "Frisco",
+    "Dillon",
+    "Silverthorne",
+    "Keystone",
+    "Copper Mountain",
+    "Vail",
+    "Vail Village",
+    "Avon",
+    "Edwards",
+    "Eagle",
+    "Gypsum",
+    "Glenwood Springs",
+    "Carbondale",
+    "Basalt",
+    "Aspen",
+    "Snowmass Village",
+    "Rifle",
+    "Parachute",
+    "Grand Junction",
+    "Fruita",
+    "Palisade",
+    "Clifton",
+    "Montrose",
+    "Ouray",
+    "Ridgway",
+    "Telluride",
+    "Mountain Village",
+    "Cortez",
+    "Durango",
+    "Bayfield",
+    "Pagosa Springs",
+    "Alamosa",
+    "Monte Vista",
+    "Trinidad",
+    "Walsenburg",
+    "La Junta",
+    "Lamar",
+    "Rocky Ford",
+    "Gunnison",
+    "Crested Butte",
+    "Steamboat Springs",
+    "Craig",
+    "Meeker",
+    "Rangely",
+    "Granby",
+    "Winter Park",
+    "Fraser",
+    "Idaho Springs",
+    "Georgetown",
+    "Evergreen",
+    "Conifer",
+    "Morrison",
+    "Bailey",
+    "Elizabeth",
+    "Kiowa",
+    "Strasburg",
+    "Bennett",
+    "Watkins",
+    "Aurora",
+    // Delaware
+    "Newark",
+    "Middletown",
+    "Smyrna",
+    "Milford",
+    "Seaford",
+    "Georgetown",
+    "Elsmere",
+    "New Castle",
+    "Bear",
+    "Glasgow",
+    "Hockessin",
+    "Greenville",
+    "Claymont",
+    "Lewes",
+    "Rehoboth Beach",
+    "Millsboro",
+    "Laurel",
+    "Harrington",
+    "Camden",
+    // Alabama
+    "Rainbow City",
+    "Homewood",
+    "Foley",
+    "Hoover",
+    "Vestavia Hills",
+    "Mountain Brook",
+    "Trussville",
+    "Pelham",
+    "Alabaster",
+    "Helena",
+    "Bessemer",
+    "Hueytown",
+    "Gardendale",
+    "Fultondale",
+    "Leeds",
+    "Moody",
+    "Pell City",
+    "Anniston",
+    "Oxford",
+    "Gadsden",
+    "Albertville",
+    "Boaz",
+    "Guntersville",
+    "Scottsboro",
+    "Fort Payne",
+    "Cullman",
+    "Decatur",
+    "Athens",
+    "Madison",
+    "Harvest",
+    "Redstone Arsenal",
+    "Cummings Research Park",
+    "Florence",
+    "Muscle Shoals",
+    "Tuscumbia",
+    "Russellville",
+    "Hamilton",
+    "Jasper",
+    "Talladega",
+    "Sylacauga",
+    "Alexander City",
+    "Auburn",
+    "Opelika",
+    "Phenix City",
+    "Eufaula",
+    "Troy",
+    "Enterprise",
+    "Dothan",
+    "Ozark",
+    "Fort Rucker|Fort Novosel",
+    "Andalusia",
+    "Greenville",
+    "Selma",
+    "Prattville",
+    "Millbrook",
+    "Wetumpka",
+    "Maxwell AFB",
+    "Daphne",
+    "Fairhope",
+    "Spanish Fort",
+    "Gulf Shores",
+    "Orange Beach",
+    "Saraland",
+    "Theodore",
+    "Prichard",
+    "Chickasaw",
+    "Bay Minette",
+    "Atmore",
+    "Brewton",
+    "Monroeville",
+    "Demopolis",
+    "Clanton",
+    "Calera",
+    "Chelsea",
+    "Columbiana",
+    "Montevallo",
+    // Idaho
+    "Meridian",
+    "American Falls",
+    "Nampa",
+    "Caldwell",
+    "Eagle",
+    "Kuna",
+    "Garden City",
+    "Mountain Home",
+    "Mountain Home AFB",
+    "Twin Falls",
+    "Jerome",
+    "Burley",
+    "Rupert",
+    "Pocatello",
+    "Chubbuck",
+    "Blackfoot",
+    "Idaho Falls",
+    "Ammon",
+    "Rexburg",
+    "Rigby",
+    "Driggs",
+    "Salmon",
+    "Hailey",
+    "Ketchum",
+    "Sun Valley",
+    "Bellevue",
+    "McCall",
+    "Cascade",
+    "Emmett",
+    "Payette",
+    "Weiser",
+    "Fruitland",
+    "Ontario",
+    "Nampa",
+    "Lewiston",
+    "Moscow",
+    "Post Falls",
+    "Hayden",
+    "Rathdrum",
+    "Sandpoint",
+    "Bonners Ferry",
+    "Kellogg",
+    "Wallace",
+    "Orofino",
+    "Grangeville",
+    // Maine
+    "Scarborough",
+    "Orland",
+    "South Portland",
+    "Westbrook",
+    "Gorham",
+    "Falmouth",
+    "Cumberland",
+    "Yarmouth",
+    "Freeport",
+    "Brunswick",
+    "Bath",
+    "Topsham",
+    "Lewiston",
+    "Auburn",
+    "Augusta",
+    "Waterville",
+    "Skowhegan",
+    "Farmington",
+    "Rumford",
+    "Bethel",
+    "Bridgton",
+    "Windham",
+    "Standish",
+    "Saco",
+    "Biddeford",
+    "Old Orchard Beach",
+    "Kennebunk",
+    "Kennebunkport",
+    "Wells",
+    "York",
+    "Kittery",
+    "Eliot",
+    "Sanford",
+    "Springvale",
+    "Rockland",
+    "Camden",
+    "Belfast",
+    "Bucksport",
+    "Ellsworth",
+    "Bar Harbor",
+    "Machias",
+    "Calais",
+    "Presque Isle",
+    "Caribou",
+    "Houlton",
+    "Millinocket",
+    "Lincoln",
+    "Orono",
+    "Old Town",
+    "Brewer",
+    "Hampden",
+    "Bangor",
+    "Damariscotta",
+    "Boothbay Harbor",
+    "Wiscasset",
+    // Montana
+    "Great Falls",
+    "Malmstrom AFB",
+    "Butte",
+    "Helena",
+    "Kalispell",
+    "Whitefish",
+    "Columbia Falls",
+    "Polson",
+    "Hamilton",
+    "Stevensville",
+    "Belgrade",
+    "Livingston",
+    "Big Sky",
+    "Red Lodge",
+    "Laurel",
+    "Miles City",
+    "Glendive",
+    "Sidney",
+    "Havre",
+    "Lewistown",
+    "Anaconda",
+    "Dillon",
+    "Deer Lodge",
+    "Cut Bank",
+    "Shelby",
+    "Conrad",
+    // Nebraska
+    "Scottsbluff",
+    "Offutt AFB",
+    "Bellevue",
+    "Papillion",
+    "La Vista",
+    "Ralston",
+    "Gretna",
+    "Elkhorn",
+    "Blair",
+    "Fremont",
+    "Columbus",
+    "Norfolk",
+    "Wayne",
+    "South Sioux City",
+    "Kearney",
+    "Hastings",
+    "Grand Island",
+    "North Platte",
+    "McCook",
+    "Lexington",
+    "Holdrege",
+    "York",
+    "Seward",
+    "Beatrice",
+    "Nebraska City",
+    "Plattsmouth",
+    "Crete",
+    "Wahoo",
+    "Ogallala",
+    "Sidney",
+    "Alliance",
+    "Chadron",
+    "Gering",
+    "Valentine",
+    "O'Neill|ONeill",
+    // Mississippi
+    "Keesler AFB",
+    "Stennis Space Center|Stennis",
+    "Columbus AFB",
+    "Biloxi",
+    "Ocean Springs",
+    "Pascagoula",
+    "Moss Point",
+    "Bay St Louis|Bay Saint Louis",
+    "Waveland",
+    "Long Beach",
+    "Diamondhead",
+    "Picayune",
+    "Hattiesburg",
+    "Petal",
+    "Laurel",
+    "Meridian",
+    "Columbus",
+    "Starkville",
+    "West Point",
+    "Tupelo",
+    "Oxford",
+    "Corinth",
+    "Southaven",
+    "Olive Branch",
+    "Horn Lake",
+    "Hernando",
+    "Batesville",
+    "Clarksdale",
+    "Greenville",
+    "Greenwood",
+    "Cleveland",
+    "Indianola",
+    "Yazoo City",
+    "Vicksburg",
+    "Natchez",
+    "Brookhaven",
+    "McComb",
+    "Ridgeland",
+    "Madison",
+    "Flowood",
+    "Pearl",
+    "Brandon",
+    "Clinton",
+    "Byram",
+    "Canton",
+    "Kosciusko",
+    "Philadelphia",
+    "Louisville",
+    "Grenada",
+    "Booneville",
+    // Tennessee
+    "Germantown",
+    "Clarksville",
+    "Oak Ridge",
+    "Jonesborough",
+    "Collierville",
+    "Bartlett",
+    "Cordova",
+    "Millington",
+    "Arlington",
+    "Lakeland",
+    "Jackson",
+    "Dyersburg",
+    "Union City",
+    "Martin",
+    "Paris",
+    "Brownsville",
+    "Covington",
+    "Columbia",
+    "Spring Hill",
+    "Thompson's Station|Thompsons Station",
+    "Nolensville",
+    "Brentwood",
+    "Hendersonville",
+    "Gallatin",
+    "Goodlettsville",
+    "Mount Juliet",
+    "Lebanon",
+    "Smyrna",
+    "La Vergne",
+    "Shelbyville",
+    "Tullahoma",
+    "Manchester",
+    "Winchester",
+    "Lewisburg",
+    "Lawrenceburg",
+    "Pulaski",
+    "Fayetteville",
+    "Cookeville",
+    "Crossville",
+    "Sparta",
+    "McMinnville",
+    "Sevierville",
+    "Pigeon Forge",
+    "Gatlinburg",
+    "Maryville",
+    "Alcoa",
+    "Lenoir City",
+    "Farragut",
+    "Kingston",
+    "Harriman",
+    "Athens",
+    "Cleveland",
+    "Dayton",
+    "Morristown",
+    "Greeneville",
+    "Elizabethton",
+    "Johnson City",
+    "Kingsport",
+    "Bristol",
+    "Franklin",
+    "Dickson",
+    "Springfield",
+    "Portland",
+    "White House",
+    "Ashland City",
+    "Kingston Springs",
+    "Fairview",
+    "Antioch",
+    "Bellevue",
+    "Green Hills",
+    "Donelson",
+    "Madison",
+    "Old Hickory",
+    "Hermitage",
+    "Berry Hill",
+    "Oak Hill",
+    "Forest Hills",
+    "Belle Meade",
+    "Manchester",
+    "Tullahoma",
+    "Arnold AFB|Arnold Air Force Base",
+    "Milan",
+    "Humboldt",
+    "Ripley",
+    "Bolivar",
+    "Savannah",
+    "Lexington",
+    // Washington
+    "Chewelah",
+    "North Bend",
+    "Sequim",
+    "Woodinville",
+    "Richland",
+    "Enumclaw",
+    "Kennewick",
+    "Pasco",
+    "West Richland",
+    "Walla Walla",
+    "Pullman",
+    "Moses Lake",
+    "Wenatchee",
+    "East Wenatchee",
+    "Ellensburg",
+    "Yakima",
+    "Sunnyside",
+    "Prosser",
+    "Union Gap",
+    "Selah",
+    "Cle Elum",
+    "Leavenworth",
+    "Chelan",
+    "Omak",
+    "Okanogan",
+    "Colville",
+    "Spokane Valley",
+    "Liberty Lake",
+    "Cheney",
+    "Airway Heights",
+    "Medical Lake",
+    "Deer Park",
+    "Mead",
+    "Newport",
+    "Sandpoint",
+    "Issaquah",
+    "Sammamish",
+    "Snoqualmie",
+    "Mercer Island",
+    "Newcastle",
+    "Maple Valley",
+    "Covington",
+    "Black Diamond",
+    "Auburn",
+    "Puyallup",
+    "Sumner",
+    "Bonney Lake",
+    "Orting",
+    "Lakewood",
+    "University Place",
+    "Fircrest",
+    "Steilacoom",
+    "DuPont",
+    "Fort Lewis|Joint Base Lewis-McChord|JBLM",
+    "Lacey",
+    "Tumwater",
+    "Yelm",
+    "Centralia",
+    "Chehalis",
+    "Aberdeen",
+    "Hoquiam",
+    "Ocean Shores",
+    "Longview",
+    "Kelso",
+    "Castle Rock",
+    "Woodland",
+    "Battle Ground",
+    "Camas",
+    "Washougal",
+    "Ridgefield",
+    "La Center",
+    "Stevenson",
+    "White Salmon",
+    "Goldendale",
+    "Port Angeles",
+    "Port Townsend",
+    "Poulsbo",
+    "Silverdale",
+    "Bremerton",
+    "Port Orchard",
+    "Gig Harbor",
+    "Bainbridge Island",
+    "Kingston",
+    "Shelton",
+    "Oak Harbor",
+    "Coupeville",
+    "Anacortes",
+    "Mount Vernon",
+    "Burlington",
+    "Sedro-Woolley",
+    "Arlington",
+    "Marysville",
+    "Lake Stevens",
+    "Snohomish",
+    "Monroe",
+    "Mill Creek",
+    "Mukilteo",
+    "Lynnwood",
+    "Edmonds",
+    "Mountlake Terrace",
+    "Shoreline",
+    "Lake Forest Park",
+    "Kenmore",
+    "Bothell",
+    "Duvall",
+    "Carnation",
+    "Redmond",
+    "Burien",
+    "SeaTac",
+    "Tukwila",
+    "Des Moines",
+    "Normandy Park",
+    "Vashon",
+    "Ferndale",
+    "Lynden",
+    "Blaine",
+    "Friday Harbor",
+    "Toppenish",
+    "Grandview",
+    "Othello",
+    "Quincy",
+    "Ephrata",
+    "Ritzville",
+    "Clarkston",
+    "Pomeroy",
+    // Oregon
+    "Tualatin",
+    "Grants Pass",
+    "Wood Village",
+    "Aloha",
+    "Pendleton",
+    "Warrenton",
+    "Beaverton",
+    "Hillsboro",
+    "Tigard",
+    "Lake Oswego",
+    "West Linn",
+    "Oregon City",
+    "Wilsonville",
+    "Sherwood",
+    "Newberg",
+    "McMinnville",
+    "Forest Grove",
+    "Cornelius",
+    "Gresham",
+    "Troutdale",
+    "Fairview",
+    "Happy Valley",
+    "Clackamas",
+    "Milwaukie",
+    "Gladstone",
+    "Canby",
+    "Molalla",
+    "Woodburn",
+    "Keizer",
+    "Silverton",
+    "Stayton",
+    "Dallas",
+    "Monmouth",
+    "Independence",
+    "Corvallis",
+    "Albany",
+    "Lebanon",
+    "Sweet Home",
+    "Springfield",
+    "Cottage Grove",
+    "Junction City",
+    "Florence",
+    "Roseburg",
+    "Medford",
+    "Ashland",
+    "Central Point",
+    "Jacksonville",
+    "Talent",
+    "Phoenix",
+    "Klamath Falls",
+    "Lakeview",
+    "Burns",
+    "Ontario",
+    "Baker City",
+    "La Grande",
+    "Hermiston",
+    "Umatilla",
+    "Boardman",
+    "The Dalles",
+    "Hood River",
+    "Redmond",
+    "Prineville",
+    "Madras",
+    "Sisters",
+    "Sunriver",
+    "La Pine",
+    "Newport",
+    "Lincoln City",
+    "Tillamook",
+    "Seaside",
+    "Astoria",
+    "Coos Bay",
+    "North Bend",
+    "Brookings",
+    "Gold Beach",
+    "St Helens|Saint Helens",
+    "Scappoose",
+    "Sandy",
+    "Estacada",
+    // Ohio
+    "Perrysburg",
+    "Elyria",
+    "Heath",
+    "Fairlawn",
+    "Blue Ash",
+    "University Heights",
+    "Wright-Patterson AFB|Wright Patterson AFB|WPAFB",
+    "Mason",
+    "West Chester",
+    "Fairfield",
+    "Hamilton",
+    "Middletown",
+    "Springboro",
+    "Miamisburg",
+    "Kettering",
+    "Beavercreek",
+    "Fairborn",
+    "Huber Heights",
+    "Centerville",
+    "Xenia",
+    "Springfield",
+    "Troy",
+    "Piqua",
+    "Sidney",
+    "Lima",
+    "Findlay",
+    "Bowling Green",
+    "Sandusky",
+    "Norwalk",
+    "Mansfield",
+    "Ashland",
+    "Wooster",
+    "Medina",
+    "Brunswick",
+    "Strongsville",
+    "North Royalton",
+    "Parma",
+    "Brooklyn",
+    "Lakewood",
+    "Rocky River",
+    "Westlake",
+    "Avon",
+    "Avon Lake",
+    "North Olmsted",
+    "Bay Village",
+    "Berea",
+    "Middleburg Heights",
+    "Independence",
+    "Brecksville",
+    "Broadview Heights",
+    "Solon",
+    "Twinsburg",
+    "Hudson",
+    "Stow",
+    "Cuyahoga Falls",
+    "Kent",
+    "Ravenna",
+    "Streetsboro",
+    "Aurora",
+    "Mentor",
+    "Willoughby",
+    "Eastlake",
+    "Painesville",
+    "Chardon",
+    "Beachwood",
+    "Mayfield Heights",
+    "Lyndhurst",
+    "Shaker Heights",
+    "Cleveland Heights",
+    "Euclid",
+    "Garfield Heights",
+    "Maple Heights",
+    "Bedford",
+    "Macedonia",
+    "Warrensville Heights",
+    "Highland Hills",
+    "Massillon",
+    "North Canton",
+    "Alliance",
+    "Louisville",
+    "Wadsworth",
+    "Barberton",
+    "Green",
+    "Uniontown",
+    "Tallmadge",
+    "Warren",
+    "Niles",
+    "Cortland",
+    "Boardman",
+    "Austintown",
+    "Salem",
+    "East Liverpool",
+    "Steubenville",
+    "Marietta",
+    "Athens",
+    "Zanesville",
+    "Cambridge",
+    "Newark",
+    "Lancaster",
+    "Pickerington",
+    "Reynoldsburg",
+    "Gahanna",
+    "New Albany",
+    "Westerville",
+    "Worthington",
+    "Dublin",
+    "Hilliard",
+    "Upper Arlington",
+    "Grandview Heights",
+    "Bexley",
+    "Whitehall",
+    "Grove City",
+    "Groveport",
+    "Canal Winchester",
+    "Delaware",
+    "Powell",
+    "Lewis Center",
+    "Sunbury",
+    "Marysville",
+    "Plain City",
+    "Marion",
+    "Bucyrus",
+    "Galion",
+    "Mount Vernon",
+    "Coshocton",
+    "Chillicothe",
+    "Circleville",
+    "Portsmouth",
+    "Ironton",
+    "Gallipolis",
+    "Jackson",
+    "Wilmington",
+    "Lebanon",
+    "Loveland",
+    "Milford",
+    "Batavia",
+    "Amelia",
+    "Norwood",
+    "Sharonville",
+    "Springdale",
+    "Forest Park",
+    "Montgomery",
+    "Madeira",
+    "Mariemont",
+    "Anderson Township",
+    "Harrison",
+    "Oxford",
+    "Eaton",
+    "Greenville",
+    "Celina",
+    "Wapakoneta",
+    "St Marys|Saint Marys",
+    "Van Wert",
+    "Defiance",
+    "Napoleon",
+    "Bryan",
+    "Wauseon",
+    "Maumee",
+    "Sylvania",
+    "Oregon",
+    "Rossford",
+    "Fremont",
+    "Tiffin",
+    "Fostoria",
+    "Port Clinton",
+    "Ashtabula",
+    "Conneaut",
+    "Geneva",
+    "Vermilion",
+    "Amherst",
+    "Oberlin",
+    "Avon",
+    "Lorain",
+    "Sheffield Village",
+    "Grafton",
+    "Wellington",
+    "Ashland",
+    "Millersburg",
+    "Dover",
+    "New Philadelphia",
+    "Cadiz",
+    "St Clairsville|Saint Clairsville",
+    "Martins Ferry",
+    "Bellaire",
+    "Athens",
+    "Logan",
+    "Nelsonville",
+    // Oklahoma
+    "Jenks",
+    "Broken Arrow",
+    "Bixby",
+    "Owasso",
+    "Sand Springs",
+    "Sapulpa",
+    "Claremore",
+    "Bartlesville",
+    "Muskogee",
+    "Tahlequah",
+    "Edmond",
+    "Moore",
+    "Norman",
+    "Midwest City",
+    "Del City",
+    "Yukon",
+    "Mustang",
+    "Bethany",
+    "Warr Acres",
+    "The Village",
+    "Nichols Hills",
+    "Guthrie",
+    "Shawnee",
+    "Ada",
+    "Ardmore",
+    "Durant",
+    "Lawton",
+    "Duncan",
+    "Chickasha",
+    "Elk City",
+    "Weatherford",
+    "Clinton",
+    "Woodward",
+    "Enid",
+    "Ponca City",
+    "Stillwater",
+    "Tinker AFB",
+    "Vance AFB",
+    "Altus",
+    "Altus AFB",
+    "McAlester",
+    "Okmulgee",
+    "Miami",
+    "Grove",
+    "Pryor",
+    // Hawaii
+    "Kailua",
+    "Kaneohe",
+    "Pearl City",
+    "Aiea",
+    "Waipahu",
+    "Ewa Beach",
+    "Kapolei",
+    "Mililani",
+    "Wahiawa",
+    "Haleiwa",
+    "Hilo",
+    "Kailua-Kona|Kona",
+    "Waimea",
+    "Kahului",
+    "Wailuku",
+    "Kihei",
+    "Lahaina",
+    "Lihue",
+    "Kapaa",
+    "Princeville",
+    "Schofield Barracks",
+    "Hickam AFB|Joint Base Pearl Harbor-Hickam",
+    "Pearl Harbor",
+    "Kaunakakai",
+    "Lanai City",
+    // Other states with word-like or ISO-colliding codes seen in the sample (NE, ME, ID, MT handled above)
+    "East Norwich"
+  ],
+  CA: [
+    // Ontario / BC / Alberta towns not in the ordinary list; they anchor a
+    // Canadian code or explicit country only ("Vaughan, ON" style already
+    // resolves via the ordinary list).
+    "Lostock",
+    "Woodbridge",
+    "Thornhill",
+    "Maple",
+    "Kleinburg",
+    "Nobleton",
+    "Schomberg",
+    "Tottenham",
+    "Beeton",
+    "Angus",
+    "Wasaga Beach",
+    "Midland",
+    "Penetanguishene",
+    "Gravenhurst",
+    "Bracebridge",
+    "Parry Sound",
+    "Elliot Lake",
+    "Espanola",
+    "Kapuskasing",
+    "Hearst",
+    "Cochrane",
+    "Kirkland Lake",
+    "New Liskeard",
+    "Temiskaming Shores",
+    "Kenora",
+    "Dryden",
+    "Fort Frances",
+    "Sioux Lookout",
+    "Marathon",
+    "Wawa",
+    "Sault Ste Marie|Sault Sainte Marie",
+    "Blind River",
+    "Sturgeon Falls",
+    "Mattawa",
+    "Deep River",
+    "Renfrew",
+    "Arnprior",
+    "Carleton Place",
+    "Smiths Falls",
+    "Kemptville",
+    "Perth",
+    "Almonte",
+    "Rockland",
+    "Hawkesbury",
+    "Casselman",
+    "Embrun",
+    "Russell",
+    "Winchester",
+    "Morrisburg",
+    "Prescott",
+    "Gananoque",
+    "Napanee",
+    "Picton",
+    "Quinte West",
+    "Brighton",
+    "Port Perry",
+    "Beaverton",
+    "Keswick",
+    "Sutton",
+    "Georgina",
+    "Mount Albert",
+    "Markdale",
+    "Hanover",
+    "Walkerton",
+    "Port Elgin",
+    "Southampton",
+    "Wiarton",
+    "Meaford",
+    "Thornbury",
+    "Creemore",
+    "Stayner",
+    "Shelburne",
+    "Fergus",
+    "Elora",
+    "Arthur",
+    "Mount Forest",
+    "Listowel",
+    "Wingham",
+    "Clinton",
+    "Seaforth",
+    "Mitchell",
+    "St Marys|Saint Marys",
+    "Paris",
+    "Ayr",
+    "Aylmer",
+    "Port Dover",
+    "Dunnville",
+    "Caledonia",
+    "Hagersville",
+    "Smithville",
+    "Beamsville",
+    "Vineland",
+    "Virgil",
+    "Niagara-on-the-Lake",
+    "Fonthill",
+    "Pelham",
+    "Wainfleet",
+    "Ridgeway",
+    "Crystal Beach",
+    "Stevensville",
+    "Chippawa",
+    "Queenston",
+    "Essex",
+    "Kingsville",
+    "Harrow",
+    "Belle River",
+    "Lakeshore",
+    "Wallaceburg",
+    "Dresden",
+    "Ridgetown",
+    "Blenheim",
+    "Petrolia",
+    "Grand Bend",
+    "Parkhill",
+    "Lucan",
+    "Ilderton",
+    "Dorchester",
+    "Thamesford",
+    "Embro",
+    "Tavistock",
+    "New Hamburg",
+    "Baden",
+    "Wellesley",
+    "Elmira",
+    "St Jacobs|Saint Jacobs",
+    "Breslau",
+    "Ayr",
+    "Langford",
+    "Colwood",
+    "Esquimalt",
+    "Oak Bay",
+    "Central Saanich",
+    "North Saanich",
+    "Sooke",
+    "Ladysmith",
+    "Chemainus",
+    "Lake Cowichan",
+    "Qualicum Beach",
+    "Comox",
+    "Cumberland",
+    "Port Hardy",
+    "Port McNeill",
+    "Tofino",
+    "Ucluelet",
+    "Gibsons",
+    "Sechelt",
+    "Pemberton",
+    "Lillooet",
+    "Merritt",
+    "Ashcroft",
+    "Cache Creek",
+    "Clearwater",
+    "Barriere",
+    "Sicamous",
+    "Enderby",
+    "Armstrong",
+    "Lumby",
+    "Coldstream",
+    "Lake Country",
+    "Peachland",
+    "Summerland",
+    "Osoyoos",
+    "Keremeos",
+    "Agassiz",
+    "Harrison Hot Springs",
+    "Fernie",
+    "Kimberley",
+    "Invermere",
+    "Golden",
+    "Revelstoke",
+    "Nakusp",
+    "Rossland",
+    "Grand Forks",
+    "Creston",
+    "Sparwood",
+    "Elkford",
+    "Fort Nelson",
+    "Fort St James|Fort Saint James",
+    "Vanderhoof",
+    "Burns Lake",
+    "Smithers",
+    "Kitimat",
+    "Prince Rupert",
+    "Masset",
+    "Queen Charlotte",
+    "Mackenzie",
+    "Chetwynd",
+    "Tumbler Ridge",
+    "Hudson's Hope",
+    "Squamish",
+    "Whistler",
+    "Bowen Island",
+    "Lions Bay",
+    "Anmore",
+    "Belcarra",
+    "Beaumont",
+    "Morinville",
+    "Stony Plain",
+    "Fort Saskatchewan",
+    "Gibbons",
+    "Redwater",
+    "Westlock",
+    "Barrhead",
+    "Whitecourt",
+    "Edson",
+    "Hinton",
+    "Drayton Valley",
+    "Rocky Mountain House",
+    "Sylvan Lake",
+    "Lacombe",
+    "Ponoka",
+    "Blackfalds",
+    "Innisfail",
+    "Olds",
+    "Didsbury",
+    "Carstairs",
+    "Crossfield",
+    "Three Hills",
+    "Drumheller",
+    "Hanna",
+    "Stettler",
+    "Wainwright",
+    "Vermilion",
+    "Vegreville",
+    "Lamont",
+    "Bonnyville",
+    "Cold Lake",
+    "St Paul|Saint Paul",
+    "Athabasca",
+    "Slave Lake",
+    "High Prairie",
+    "Peace River",
+    "Fairview",
+    "Grimshaw",
+    "High Level",
+    "Valleyview",
+    "Fox Creek",
+    "Grande Cache",
+    "Canmore",
+    "Cochrane",
+    "High River",
+    "Turner Valley",
+    "Black Diamond",
+    "Diamond Valley",
+    "Nanton",
+    "Claresholm",
+    "Fort Macleod",
+    "Pincher Creek",
+    "Cardston",
+    "Magrath",
+    "Raymond",
+    "Taber",
+    "Coaldale",
+    "Picture Butte",
+    "Vauxhall",
+    "Bassano",
+    "Oyen"
+  ],
+  AU: [],
+  GB: [],
+  IN: [],
+  SG: [],
+  JP: []
+};
+var shapeSafeRegionCodes = ["OR", "HI", "OK", "OH", "ON", "MB", "NB", "ACT"];
 
 // src/location-gazetteer.ts
 var markets = new Set(supportedMarketCodes);
@@ -25586,8 +28054,9 @@ function tokenize(segment) {
 var phraseKey = (value) => tokenize(value.normalize("NFKC")).map((token) => token.norm).join(" ");
 var cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 var cjkSuffix = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]{0,8}[区市町村郡]$/u;
-var negative = /\b(?:not|except|excluding|excluded|outside|sauf|hors|exclu(?:e|s|es)?)\b|以外|除外|対象外|除く|不包括|不含|बाहर/iu;
-var shortLabels = { US: "US", USA: "US", UK: "GB", GB: "GB", GBR: "GB", AU: "AU", AUS: "AU", CAN: "CA", SG: "SG", SGP: "SG", JP: "JP", JPN: "JP" };
+var negative2 = /\b(?:not|except|excluding|excluded|outside|sauf|hors|exclu(?:e|s|es)?)\b|以外|除外|対象外|除く|不包括|不含|बाहर/iu;
+var shortLabels2 = { US: "US", USA: "US", UK: "GB", GB: "GB", GBR: "GB", AU: "AU", AUS: "AU", CAN: "CA", SG: "SG", SGP: "SG", JP: "JP", JPN: "JP" };
+var placeLike = /^(?!(?:[Rr]emote|[Hh]ybrid|[Oo]n-?[Ss]ite|[Vv]irtual|[Aa]nywhere|[Ff]lexible|[Hh]ome|[Ww][Ff][Hh])\b)\p{Lu}[\p{L}'’.]*(?:[\s-]\p{L}[\p{L}'’.]*){0,3}$/u;
 var unitSeparator = /[;|/\n]+/u;
 var segmentSeparator = /[,()（）、]+|\s+[-–—]+\s+/u;
 var entries = /* @__PURE__ */ new Map();
@@ -25596,7 +28065,7 @@ var maxTokens = 1;
 function entryFor(key, display) {
   let entry = entries.get(key);
   if (!entry) {
-    entry = { key, display, tokenCount: key.split(" ").length, kinds: /* @__PURE__ */ new Map(), nonMarket: /* @__PURE__ */ new Set(), ambiguous: false, wholeSegmentOnly: false, defaultCountry: null };
+    entry = { key, display, tokenCount: key.split(" ").length, kinds: /* @__PURE__ */ new Map(), nonMarket: /* @__PURE__ */ new Set(), ambiguous: false, wholeSegmentOnly: false, defaultCountry: null, anchorOnlyIn: /* @__PURE__ */ new Set(), anchorOnly: false };
     entries.set(key, entry);
     maxTokens = Math.max(maxTokens, entry.tokenCount);
   }
@@ -25620,13 +28089,25 @@ for (const country of supportedMarketCodes) {
   const guardedByCountry = anchorRequiredCodeCountries.includes(country);
   for (const code of data.regionCodes) {
     const upper = code.normalize("NFKC").toUpperCase();
-    const existing = codes.get(upper) ?? { code: upper, countries: /* @__PURE__ */ new Set(), guarded: false, wordGuarded: guardedRegionCodes.includes(upper), collision: null };
+    const existing = codes.get(upper) ?? { code: upper, countries: /* @__PURE__ */ new Set(), guarded: false, wordGuarded: guardedRegionCodes.includes(upper), collision: null, shapeSafe: false };
     existing.countries.add(country);
     existing.guarded = existing.guarded || guardedByCountry || existing.wordGuarded;
     existing.collision = countryCollisionCodes[upper] ?? null;
     codes.set(upper, existing);
   }
+  for (const item of anchorOnlyCities[country]) {
+    for (const form of item.split("|")) {
+      const key = phraseKey(form);
+      if (!key) continue;
+      const entry = entryFor(key, form.trim());
+      if (!entry.kinds.has(country)) {
+        entry.kinds.set(country, /* @__PURE__ */ new Set(["city"]));
+        entry.anchorOnlyIn.add(country);
+      }
+    }
+  }
 }
+for (const code of codes.values()) code.shapeSafe = shapeSafeRegionCodes.includes(code.code) && code.countries.size === 1 && !code.collision;
 for (const [name, modifier] of Object.entries(gazetteerModifiers)) {
   const key = phraseKey(name);
   if (!key) continue;
@@ -25641,7 +28122,22 @@ for (const [name, modifier] of Object.entries(gazetteerModifiers)) {
   }
 }
 for (const entry of entries.values()) {
-  if (entry.kinds.size + entry.nonMarket.size > 1) entry.ambiguous = true;
+  if (!entry.anchorOnlyIn.size || entry.tokenCount < 2) continue;
+  const tokens = entry.key.split(" ");
+  for (const country of [...entry.anchorOnlyIn]) {
+    let contains = false;
+    for (let length = entry.tokenCount - 1; length >= 1 && !contains; length--)
+      for (let start = 0; start + length <= tokens.length && !contains; start++) {
+        const part = entries.get(tokens.slice(start, start + length).join(" "));
+        if (part && !part.ambiguous && part.kinds.size === 1 && part.kinds.has(country) && !part.anchorOnlyIn.has(country) && part.nonMarket.size === 0) contains = true;
+      }
+    if (contains) entry.anchorOnlyIn.delete(country);
+  }
+}
+for (const entry of entries.values()) {
+  const ordinary = entry.kinds.size - entry.anchorOnlyIn.size;
+  if (ordinary + entry.nonMarket.size > 1) entry.ambiguous = true;
+  entry.anchorOnly = entry.anchorOnlyIn.size > 0 && ordinary === 0 && entry.nonMarket.size === 0 && !entry.defaultCountry;
 }
 var cjkKeys = [...entries.keys()].filter((key) => cjk.test(key) && !key.includes(" ")).sort((a, b) => b.length - a.length);
 var hasKind = (entry, country, ...kinds) => kinds.some((kind) => entry.kinds.get(country)?.has(kind));
@@ -25649,16 +28145,17 @@ var isCityOnly = (entry) => [...entry.kinds.values()].every((kinds) => !kinds.ha
 function nameItem(entry, text2, segment) {
   const candidates = new Set(entry.kinds.keys());
   const regionReading = new Set([...entry.kinds.keys()].filter((country) => hasKind(entry, country, "region")));
-  return { type: "name", text: text2, segment, candidates, regionReading: regionReading.size ? regionReading : candidates, ambiguous: entry.ambiguous || candidates.size !== 1, cityish: isCityOnly(entry), entry, code: null, anchored: true, resolved: null, confidence: null, inConflict: false };
+  const ordinary = new Set([...candidates].filter((country) => !entry.anchorOnlyIn.has(country)));
+  return { type: "name", text: text2, segment, candidates, regionReading: regionReading.size ? regionReading : candidates, ambiguous: entry.ambiguous || (entry.anchorOnly ? candidates.size !== 1 : ordinary.size !== 1), cityish: isCityOnly(entry), entry, code: null, anchored: true, resolved: null, confidence: null, inConflict: false, anchorOnly: entry.anchorOnly };
 }
 function codeItem(code, text2, segment) {
   const candidates = new Set(code.countries);
   if (code.collision) candidates.add(code.collision.country);
-  return { type: "code", text: text2, segment, candidates, regionReading: candidates, ambiguous: candidates.size !== 1, cityish: false, entry: null, code, anchored: !code.guarded, resolved: null, confidence: null, inConflict: false };
+  return { type: "code", text: text2, segment, candidates, regionReading: candidates, ambiguous: candidates.size !== 1, cityish: false, entry: null, code, anchored: !code.guarded, resolved: null, confidence: null, inConflict: false, anchorOnly: false };
 }
 function explicitItem(country, text2, segment) {
   const candidates = /* @__PURE__ */ new Set([country]);
-  return { type: "explicit", text: text2, segment, candidates, regionReading: candidates, ambiguous: false, cityish: false, entry: null, code: null, anchored: true, resolved: country, confidence: "high", inConflict: false };
+  return { type: "explicit", text: text2, segment, candidates, regionReading: candidates, ambiguous: false, cityish: false, entry: null, code: null, anchored: true, resolved: country, confidence: "high", inConflict: false, anchorOnly: false };
 }
 function explicitCountryAt(tokens, index) {
   for (let length = Math.min(4, tokens.length - index); length >= 1; length--) {
@@ -25669,7 +28166,7 @@ function explicitCountryAt(tokens, index) {
   const bare = tokens[index].text.normalize("NFKC").replace(/\./g, "");
   const others = tokens.filter((_, position) => position !== index);
   const besideCode = tokens.length <= 2 && others.every((token) => /^[A-Z]{2,3}$/.test(token.text.normalize("NFKC")) && codes.has(token.text.normalize("NFKC")));
-  if (/^[A-Z]{2,3}$/.test(bare) && shortLabels[bare] && besideCode) return { country: shortLabels[bare], length: 1 };
+  if (/^[A-Z]{2,3}$/.test(bare) && shortLabels2[bare] && besideCode) return { country: shortLabels2[bare], length: 1 };
   return null;
 }
 function itemsForSegment(segment, segmentIndex) {
@@ -25706,7 +28203,7 @@ function itemsForSegment(segment, segmentIndex) {
       index += matched.length;
       continue;
     }
-    const upper = tokens[index].text.normalize("NFKC");
+    const upper = tokens[index].text.normalize("NFKC").replace(/\./g, "");
     const code = /^[A-Z]{2,3}$/.test(upper) ? codes.get(upper) : void 0;
     if (code) {
       const item = codeItem(code, tokens[index].text, segmentIndex);
@@ -25741,9 +28238,19 @@ function anchorCodes(group, unitItems) {
     }
   }
 }
+function settleAnchorReadings(group) {
+  for (const item of group) {
+    if (item.type !== "name" || !item.entry || !item.entry.anchorOnlyIn.size || item.entry.anchorOnly) continue;
+    const anchorMarkets = item.entry.anchorOnlyIn;
+    const beside = group.find((other) => other !== item && (other.type === "explicit" || other.type === "code" && other.anchored) && other.candidates.size === 1 && anchorMarkets.has([...other.candidates][0]));
+    if (beside) item.candidates = new Set(beside.candidates);
+    else item.candidates = new Set([...item.candidates].filter((country) => !anchorMarkets.has(country)));
+  }
+}
 function resolveGroup(group, unitItems) {
   anchorCodes(group, unitItems);
-  const anchors = group.filter((item) => !item.ambiguous && item.anchored);
+  settleAnchorReadings(group);
+  const anchors = group.filter((item) => !item.ambiguous && item.anchored && !item.anchorOnly);
   const anchorCountries = new Set(anchors.map((item) => [...item.candidates][0]));
   const conflict = anchorCountries.size > 1;
   for (const item of anchors) {
@@ -25752,7 +28259,7 @@ function resolveGroup(group, unitItems) {
     item.inConflict = conflict;
   }
   if (!conflict) {
-    const open = group.filter((item) => item.ambiguous || !item.anchored);
+    const open = group.filter((item) => item.ambiguous || !item.anchored || item.anchorOnly);
     if (anchorCountries.size === 1) {
       const country = [...anchorCountries][0];
       for (const item of open) {
@@ -25763,7 +28270,7 @@ function resolveGroup(group, unitItems) {
         }
       }
     } else {
-      const mutual = open.filter((item) => item.type !== "code" || item.anchored || item.ambiguous);
+      const mutual = open.filter((item) => (!item.anchorOnly || item.candidates.size === 1) && (item.type !== "code" || item.anchored || item.ambiguous));
       if (mutual.length >= 2) {
         const first = mutual[0];
         let intersection = new Set(first.candidates);
@@ -25804,11 +28311,13 @@ function gazetteerCountryEvidence(label2) {
   for (const unit of label2.normalize("NFKC").split(unitSeparator)) {
     const unitItems = [];
     const groups = [];
+    const shape = [];
     for (const raw of unit.split(segmentSeparator)) {
       const segment = raw.trim();
       segmentIndex++;
-      if (!segment || negative.test(segment)) continue;
+      if (!segment || negative2.test(segment)) continue;
       const items = itemsForSegment(segment, segmentIndex);
+      shape.push({ segment, items });
       if (!items.length) continue;
       const startsGroup = items.some((item) => item.type === "name" && item.cityish) || !groups.length;
       if (startsGroup) groups.push([]);
@@ -25816,6 +28325,14 @@ function gazetteerCountryEvidence(label2) {
       unitItems.push(...items);
     }
     for (const group of groups) if (resolveGroup(group, unitItems)) result.conflict = true;
+    if (shape.length === 2 && shape[0].items.length === 0 && shape[1].items.length === 1) {
+      const [place, code] = [shape[0], shape[1].items[0]];
+      if (code.type === "code" && code.code?.shapeSafe && !code.anchored && !code.resolved && placeLike.test(place.segment) && code.text.normalize("NFKC") === shape[1].segment.normalize("NFKC")) {
+        code.anchored = true;
+        code.resolved = [...code.candidates][0];
+        code.confidence = "medium";
+      }
+    }
     allItems.push(...unitItems);
   }
   for (const item of allItems) {
@@ -25838,7 +28355,7 @@ function gazetteerCountryEvidence(label2) {
       if (item.code?.collision && item.resolved === item.code.collision.country) continue;
       result.matches.push({ token: item.text, country: item.resolved, kind: kindOf(item), confidence: item.confidence });
       if (!result.countries.includes(item.resolved)) result.countries.push(item.resolved);
-    } else if (item.ambiguous && (item.type === "name" || !item.code?.wordGuarded || item.code.collision)) {
+    } else if (item.ambiguous && !item.anchorOnly && (item.type === "name" || !item.code?.wordGuarded || item.code.collision)) {
       const key = normalizeToken(item.text);
       if (!seenAmbiguous.has(key)) {
         seenAmbiguous.add(key);
@@ -25848,10 +28365,1320 @@ function gazetteerCountryEvidence(label2) {
   }
   return result;
 }
-function combineCountryEvidence(explicit, gazetteer) {
-  const stated = [...new Set(explicit.filter((code) => typeof code === "string" && code))];
-  if (stated.length) return stated;
-  return gazetteer.conflict ? [] : [...gazetteer.countries];
+
+// src/location-country-data.ts
+var worldCountryAliases = {
+  "uae": "AE",
+  "u a e": "AE",
+  "emirates": "AE",
+  "ksa": "SA",
+  "kingdom of saudi arabia": "SA",
+  "south korea": "KR",
+  "korea": "KR",
+  "republic of korea": "KR",
+  "korea republic of": "KR",
+  "north korea": "KP",
+  "czech republic": "CZ",
+  "czech": "CZ",
+  "czechia": "CZ",
+  "slovak republic": "SK",
+  "russia": "RU",
+  "russian federation": "RU",
+  "viet nam": "VN",
+  "vietnam": "VN",
+  "brasil": "BR",
+  "deutschland": "DE",
+  "espana": "ES",
+  "italia": "IT",
+  "polska": "PL",
+  "schweiz": "CH",
+  "suisse": "CH",
+  "svizzera": "CH",
+  "osterreich": "AT",
+  "sverige": "SE",
+  "norge": "NO",
+  "danmark": "DK",
+  "suomi": "FI",
+  "nederland": "NL",
+  "the netherlands": "NL",
+  "netherlands": "NL",
+  "belgique": "BE",
+  "belgie": "BE",
+  "turkiye": "TR",
+  "turkey": "TR",
+  "ivory coast": "CI",
+  "cote divoire": "CI",
+  "cote d ivoire": "CI",
+  "myanmar": "MM",
+  "burma": "MM",
+  "macau": "MO",
+  "macao": "MO",
+  "hong kong": "HK",
+  "hong kong sar": "HK",
+  "hksar": "HK",
+  "hong kong sar china": "HK",
+  "taiwan": "TW",
+  "mainland china": "CN",
+  "prc": "CN",
+  "peoples republic of china": "CN",
+  "china": "CN",
+  "republic of ireland": "IE",
+  "eire": "IE",
+  "the philippines": "PH",
+  "philippines": "PH",
+  "the bahamas": "BS",
+  "the gambia": "GM",
+  "swaziland": "SZ",
+  "eswatini": "SZ",
+  "north macedonia": "MK",
+  "macedonia": "MK",
+  "bosnia and herzegovina": "BA",
+  "bosnia": "BA",
+  "trinidad and tobago": "TT",
+  "trinidad": "TT",
+  "saint lucia": "LC",
+  "st lucia": "LC",
+  "antigua": "AG",
+  "antigua and barbuda": "AG",
+  "palestine": "PS",
+  "palestinian territories": "PS",
+  "state of palestine": "PS",
+  "democratic republic of the congo": "CD",
+  "dr congo": "CD",
+  "drc": "CD",
+  "congo kinshasa": "CD",
+  "republic of the congo": "CG",
+  "congo brazzaville": "CG",
+  "timor leste": "TL",
+  "east timor": "TL",
+  "cape verde": "CV",
+  "cabo verde": "CV",
+  "curacao": "CW",
+  "kosovo": "XK",
+  "brunei": "BN",
+  "brunei darussalam": "BN",
+  "laos": "LA",
+  "lao pdr": "LA",
+  "syria": "SY",
+  "iran": "IR",
+  "moldova": "MD",
+  "republic of moldova": "MD",
+  "tanzania": "TZ",
+  "bolivia": "BO",
+  "venezuela": "VE",
+  "faroe islands": "FO",
+  "vatican city": "VA",
+  "united arab emirates": "AE",
+  "saudi arabia": "SA",
+  "new zealand": "NZ",
+  "nz": "NZ",
+  "south africa": "ZA",
+  "rsa": "ZA",
+  "mexico": "MX",
+  "germany": "DE",
+  "france": "FR",
+  "spain": "ES",
+  "italy": "IT",
+  "poland": "PL",
+  "portugal": "PT",
+  "ireland": "IE",
+  "switzerland": "CH",
+  "austria": "AT",
+  "sweden": "SE",
+  "norway": "NO",
+  "denmark": "DK",
+  "finland": "FI",
+  "belgium": "BE",
+  "luxembourg": "LU",
+  "greece": "GR",
+  "hungary": "HU",
+  "romania": "RO",
+  "bulgaria": "BG",
+  "croatia": "HR",
+  "serbia": "RS",
+  "slovenia": "SI",
+  "slovakia": "SK",
+  "ukraine": "UA",
+  "estonia": "EE",
+  "latvia": "LV",
+  "lithuania": "LT",
+  "cyprus": "CY",
+  "malta": "MT",
+  "iceland": "IS",
+  "israel": "IL",
+  "egypt": "EG",
+  "kenya": "KE",
+  "nigeria": "NG",
+  "ghana": "GH",
+  "morocco": "MA",
+  "tunisia": "TN",
+  "algeria": "DZ",
+  "ethiopia": "ET",
+  "uganda": "UG",
+  "rwanda": "RW",
+  "brazil": "BR",
+  "argentina": "AR",
+  "chile": "CL",
+  "colombia": "CO",
+  "peru": "PE",
+  "uruguay": "UY",
+  "ecuador": "EC",
+  "costa rica": "CR",
+  "panama": "PA",
+  "guatemala": "GT",
+  "dominican republic": "DO",
+  "honduras": "HN",
+  "el salvador": "SV",
+  "nicaragua": "NI",
+  "paraguay": "PY",
+  "jamaica": "JM",
+  "bahamas": "BS",
+  "barbados": "BB",
+  "pakistan": "PK",
+  "bangladesh": "BD",
+  "sri lanka": "LK",
+  "nepal": "NP",
+  "indonesia": "ID",
+  "malaysia": "MY",
+  "thailand": "TH",
+  "cambodia": "KH",
+  "mongolia": "MN",
+  "kazakhstan": "KZ",
+  "uzbekistan": "UZ",
+  "armenia": "AM",
+  "azerbaijan": "AZ",
+  "qatar": "QA",
+  "kuwait": "KW",
+  "bahrain": "BH",
+  "oman": "OM",
+  "jordan": "JO",
+  "lebanon": "LB",
+  "iraq": "IQ"
+};
+var worldCountryBlocklist = [
+  "georgia",
+  // US state far more often than the country in job locations
+  "jersey",
+  // Channel Island vs New Jersey shorthand
+  "lebanon",
+  // Lebanon PA/NH/OH/TN/IN/OR are common US job locations; "Beirut" still resolves
+  "congo",
+  // two countries
+  "guinea",
+  // Guinea, Guinea-Bissau, Equatorial Guinea, Papua New Guinea
+  "chad",
+  // a first name in some feeds' address lines
+  "niger",
+  // Niger vs Nigeria typos in address lines
+  "puerto rico",
+  "guam",
+  "us virgin islands",
+  "u s virgin islands",
+  "american samoa",
+  "northern mariana islands",
+  "us outlying islands",
+  "u s outlying islands",
+  // US territories: the gazetteer reads Puerto Rico as US
+  "united states",
+  "united kingdom",
+  "canada",
+  "australia",
+  "india",
+  "singapore",
+  "japan",
+  // markets: country-evidence.ts owns these
+  "antarctica",
+  "bouvet island",
+  "heard and mcdonald islands",
+  "french southern territories",
+  "pitcairn islands",
+  "south georgia and south sandwich islands",
+  "british indian ocean territory",
+  "svalbard and jan mayen",
+  "western sahara",
+  "reunion",
+  "mayotte",
+  "st martin",
+  "sint maarten",
+  "st barthelemy",
+  "caribbean netherlands",
+  "aland islands",
+  "st helena",
+  "tokelau",
+  "niue",
+  "wallis and futuna",
+  "christmas island",
+  "cocos keeling islands",
+  "norfolk island",
+  "isle of man",
+  "guernsey"
+];
+var worldCities = {
+  // Germany
+  "berlin": "DE",
+  "munich": "DE",
+  "munchen": "DE",
+  "hamburg": "DE",
+  "frankfurt": "DE",
+  "frankfurt am main": "DE",
+  "cologne": "DE",
+  "koln": "DE",
+  "stuttgart": "DE",
+  "dusseldorf": "DE",
+  "dortmund": "DE",
+  "essen": "DE",
+  "leipzig": "DE",
+  "bremen": "DE",
+  "dresden": "DE",
+  "hannover": "DE",
+  "nuremberg": "DE",
+  "nurnberg": "DE",
+  "duisburg": "DE",
+  "bochum": "DE",
+  "wuppertal": "DE",
+  "bielefeld": "DE",
+  "bonn": "DE",
+  "karlsruhe": "DE",
+  "mannheim": "DE",
+  "augsburg": "DE",
+  "wiesbaden": "DE",
+  "aachen": "DE",
+  "braunschweig": "DE",
+  "kiel": "DE",
+  "chemnitz": "DE",
+  "magdeburg": "DE",
+  "freiburg": "DE",
+  "freiburg im breisgau": "DE",
+  "mainz": "DE",
+  "lubeck": "DE",
+  "erfurt": "DE",
+  "rostock": "DE",
+  "kassel": "DE",
+  "saarbrucken": "DE",
+  "darmstadt": "DE",
+  "regensburg": "DE",
+  "ingolstadt": "DE",
+  "wurzburg": "DE",
+  "ulm": "DE",
+  "heilbronn": "DE",
+  "gottingen": "DE",
+  "wolfsburg": "DE",
+  "jena": "DE",
+  "trier": "DE",
+  "erlangen": "DE",
+  "paderborn": "DE",
+  "koblenz": "DE",
+  "oberhausen": "DE",
+  "leverkusen": "DE",
+  "garching": "DE",
+  "boblingen": "DE",
+  "sindelfingen": "DE",
+  "ludwigsburg": "DE",
+  "esslingen": "DE",
+  "reutlingen": "DE",
+  "tubingen": "DE",
+  "konstanz": "DE",
+  "friedrichshafen": "DE",
+  "ottobrunn": "DE",
+  "unterfohring": "DE",
+  "neubiberg": "DE",
+  "idar oberstein": "DE",
+  "eschborn": "DE",
+  "bad homburg": "DE",
+  "walldorf": "DE",
+  "ratingen": "DE",
+  "neuss": "DE",
+  "monchengladbach": "DE",
+  // Austria, Switzerland
+  "wien": "AT",
+  "graz": "AT",
+  "linz": "AT",
+  "salzburg": "AT",
+  "innsbruck": "AT",
+  "klagenfurt": "AT",
+  "zurich": "CH",
+  "basel": "CH",
+  "bern": "CH",
+  "berne": "CH",
+  "lausanne": "CH",
+  "lucerne": "CH",
+  "luzern": "CH",
+  "winterthur": "CH",
+  "zug": "CH",
+  "lugano": "CH",
+  "st gallen": "CH",
+  "sankt gallen": "CH",
+  "schaffhausen": "CH",
+  // France
+  "lyon": "FR",
+  "marseille": "FR",
+  "toulouse": "FR",
+  "bordeaux": "FR",
+  "lille": "FR",
+  "nantes": "FR",
+  "strasbourg": "FR",
+  "montpellier": "FR",
+  "rennes": "FR",
+  "grenoble": "FR",
+  "sophia antipolis": "FR",
+  "aix en provence": "FR",
+  "toulon": "FR",
+  "rouen": "FR",
+  "metz": "FR",
+  "dijon": "FR",
+  "angers": "FR",
+  "le havre": "FR",
+  "reims": "FR",
+  "cannes": "FR",
+  "annecy": "FR",
+  "clermont ferrand": "FR",
+  "saint etienne": "FR",
+  "boulogne billancourt": "FR",
+  "issy les moulineaux": "FR",
+  "la defense": "FR",
+  "levallois perret": "FR",
+  "neuilly sur seine": "FR",
+  "courbevoie": "FR",
+  "nanterre": "FR",
+  "massy": "FR",
+  "saclay": "FR",
+  "palaiseau": "FR",
+  "velizy": "FR",
+  "velizy villacoublay": "FR",
+  "roissy": "FR",
+  "valence": "FR",
+  "le kremlin bicetre": "FR",
+  "puteaux": "FR",
+  "montreuil": "FR",
+  "ivry sur seine": "FR",
+  "la ciotat": "FR",
+  "sophia": "FR",
+  "biot": "FR",
+  "meudon": "FR",
+  "rueil malmaison": "FR",
+  "saint denis": "FR",
+  // Iberia
+  "madrid": "ES",
+  "barcelona": "ES",
+  "seville": "ES",
+  "sevilla": "ES",
+  "bilbao": "ES",
+  "zaragoza": "ES",
+  "alicante": "ES",
+  "murcia": "ES",
+  "palma": "ES",
+  "palma de mallorca": "ES",
+  "valladolid": "ES",
+  "vigo": "ES",
+  "gijon": "ES",
+  "salamanca": "ES",
+  "santander": "ES",
+  "san sebastian": "ES",
+  "donostia": "ES",
+  "pamplona": "ES",
+  "marbella": "ES",
+  "ibiza": "ES",
+  "sant cugat": "ES",
+  "sant cugat del valles": "ES",
+  "alcobendas": "ES",
+  "getafe": "ES",
+  "lisbon": "PT",
+  "lisboa": "PT",
+  "porto": "PT",
+  "braga": "PT",
+  "coimbra": "PT",
+  "aveiro": "PT",
+  "oeiras": "PT",
+  // Italy
+  "milan": "IT",
+  "milano": "IT",
+  "turin": "IT",
+  "torino": "IT",
+  "bologna": "IT",
+  "genoa": "IT",
+  "genova": "IT",
+  "palermo": "IT",
+  "catania": "IT",
+  "verona": "IT",
+  "padua": "IT",
+  "padova": "IT",
+  "trieste": "IT",
+  "modena": "IT",
+  "brescia": "IT",
+  "bergamo": "IT",
+  "bari": "IT",
+  "pisa": "IT",
+  "venezia": "IT",
+  "roma": "IT",
+  "firenze": "IT",
+  "napoli": "IT",
+  "cagliari": "IT",
+  "trento": "IT",
+  "bolzano": "IT",
+  "reggio emilia": "IT",
+  "ivrea": "IT",
+  // Benelux
+  "amsterdam": "NL",
+  "rotterdam": "NL",
+  "the hague": "NL",
+  "den haag": "NL",
+  "utrecht": "NL",
+  "eindhoven": "NL",
+  "groningen": "NL",
+  "delft": "NL",
+  "leiden": "NL",
+  "haarlem": "NL",
+  "arnhem": "NL",
+  "nijmegen": "NL",
+  "tilburg": "NL",
+  "breda": "NL",
+  "maastricht": "NL",
+  "enschede": "NL",
+  "amersfoort": "NL",
+  "almere": "NL",
+  "hilversum": "NL",
+  "hoofddorp": "NL",
+  "schiphol": "NL",
+  "schiphol rijk": "NL",
+  "zwolle": "NL",
+  "apeldoorn": "NL",
+  "wageningen": "NL",
+  "veldhoven": "NL",
+  "s hertogenbosch": "NL",
+  "den bosch": "NL",
+  "amstelveen": "NL",
+  "brussels": "BE",
+  "bruxelles": "BE",
+  "brussel": "BE",
+  "antwerp": "BE",
+  "antwerpen": "BE",
+  "ghent": "BE",
+  "gent": "BE",
+  "leuven": "BE",
+  "bruges": "BE",
+  "brugge": "BE",
+  "liege": "BE",
+  "mechelen": "BE",
+  "namur": "BE",
+  "charleroi": "BE",
+  "hasselt": "BE",
+  "kortrijk": "BE",
+  "zaventem": "BE",
+  "diegem": "BE",
+  "louvain la neuve": "BE",
+  "luxembourg city": "LU",
+  "esch sur alzette": "LU",
+  // Nordics, Baltics, Ireland
+  "stockholm": "SE",
+  "gothenburg": "SE",
+  "goteborg": "SE",
+  "malmo": "SE",
+  "uppsala": "SE",
+  "lund": "SE",
+  "linkoping": "SE",
+  "vasteras": "SE",
+  "orebro": "SE",
+  "helsingborg": "SE",
+  "solna": "SE",
+  "kista": "SE",
+  "copenhagen": "DK",
+  "kobenhavn": "DK",
+  "aarhus": "DK",
+  "arhus": "DK",
+  "odense": "DK",
+  "aalborg": "DK",
+  "oslo": "NO",
+  "trondheim": "NO",
+  "stavanger": "NO",
+  "helsinki": "FI",
+  "espoo": "FI",
+  "tampere": "FI",
+  "turku": "FI",
+  "oulu": "FI",
+  "vantaa": "FI",
+  "reykjavik": "IS",
+  "cork": "IE",
+  "galway": "IE",
+  "limerick": "IE",
+  "athlone": "IE",
+  "vilnius": "LT",
+  "kaunas": "LT",
+  "riga": "LV",
+  "tallinn": "EE",
+  "tartu": "EE",
+  // Central and Eastern Europe
+  "warsaw": "PL",
+  "warszawa": "PL",
+  "krakow": "PL",
+  "cracow": "PL",
+  "wroclaw": "PL",
+  "poznan": "PL",
+  "gdansk": "PL",
+  "lodz": "PL",
+  "katowice": "PL",
+  "lublin": "PL",
+  "szczecin": "PL",
+  "bydgoszcz": "PL",
+  "gdynia": "PL",
+  "bialystok": "PL",
+  "rzeszow": "PL",
+  "prague": "CZ",
+  "praha": "CZ",
+  "brno": "CZ",
+  "ostrava": "CZ",
+  "plzen": "CZ",
+  "pilsen": "CZ",
+  "olomouc": "CZ",
+  "bratislava": "SK",
+  "kosice": "SK",
+  "budapest": "HU",
+  "debrecen": "HU",
+  "szeged": "HU",
+  "bucharest": "RO",
+  "bucuresti": "RO",
+  "cluj napoca": "RO",
+  "cluj": "RO",
+  "timisoara": "RO",
+  "iasi": "RO",
+  "brasov": "RO",
+  "constanta": "RO",
+  "sibiu": "RO",
+  "oradea": "RO",
+  "craiova": "RO",
+  "sofia": "BG",
+  "plovdiv": "BG",
+  "varna": "BG",
+  "burgas": "BG",
+  "thessaloniki": "GR",
+  "patras": "GR",
+  "heraklion": "GR",
+  "ioannina": "GR",
+  "belgrade": "RS",
+  "beograd": "RS",
+  "novi sad": "RS",
+  "nis": "RS",
+  "zagreb": "HR",
+  "rijeka": "HR",
+  "ljubljana": "SI",
+  "maribor": "SI",
+  "sarajevo": "BA",
+  "skopje": "MK",
+  "podgorica": "ME",
+  "tirana": "AL",
+  "pristina": "XK",
+  "kyiv": "UA",
+  "kiev": "UA",
+  "lviv": "UA",
+  "kharkiv": "UA",
+  "odesa": "UA",
+  "dnipro": "UA",
+  "chisinau": "MD",
+  "minsk": "BY",
+  "novosibirsk": "RU",
+  "yekaterinburg": "RU",
+  "kazan": "RU",
+  "nizhny novgorod": "RU",
+  "istanbul": "TR",
+  "ankara": "TR",
+  "izmir": "TR",
+  "bursa": "TR",
+  "antalya": "TR",
+  "nicosia": "CY",
+  "limassol": "CY",
+  "larnaca": "CY",
+  "valletta": "MT",
+  "sliema": "MT",
+  "birkirkara": "MT",
+  // Middle East
+  "dubai": "AE",
+  "abu dhabi": "AE",
+  "sharjah": "AE",
+  "doha": "QA",
+  "riyadh": "SA",
+  "jeddah": "SA",
+  "dammam": "SA",
+  "al khobar": "SA",
+  "khobar": "SA",
+  "manama": "BH",
+  "muscat": "OM",
+  "kuwait city": "KW",
+  "amman": "JO",
+  "beirut": "LB",
+  "baghdad": "IQ",
+  "erbil": "IQ",
+  "tehran": "IR",
+  "tel aviv": "IL",
+  "tel aviv yafo": "IL",
+  "haifa": "IL",
+  "herzliya": "IL",
+  "herzliya pituach": "IL",
+  "netanya": "IL",
+  "raanana": "IL",
+  "ra anana": "IL",
+  "petah tikva": "IL",
+  "petach tikva": "IL",
+  "rehovot": "IL",
+  "beersheba": "IL",
+  "beer sheva": "IL",
+  "ramat gan": "IL",
+  "kfar saba": "IL",
+  "modiin": "IL",
+  "modi in": "IL",
+  "yokneam": "IL",
+  "caesarea": "IL",
+  "rosh haayin": "IL",
+  "rosh ha ayin": "IL",
+  "hod hasharon": "IL",
+  "or yehuda": "IL",
+  "holon": "IL",
+  "ashdod": "IL",
+  "eilat": "IL",
+  "bnei brak": "IL",
+  // Africa
+  "cairo": "EG",
+  "giza": "EG",
+  "casablanca": "MA",
+  "rabat": "MA",
+  "marrakech": "MA",
+  "marrakesh": "MA",
+  "tangier": "MA",
+  "tunis": "TN",
+  "algiers": "DZ",
+  "niamey": "NE",
+  "lagos": "NG",
+  "abuja": "NG",
+  "port harcourt": "NG",
+  "accra": "GH",
+  "kumasi": "GH",
+  "nairobi": "KE",
+  "mombasa": "KE",
+  "kampala": "UG",
+  "kigali": "RW",
+  "dar es salaam": "TZ",
+  "addis ababa": "ET",
+  "lusaka": "ZM",
+  "harare": "ZW",
+  "johannesburg": "ZA",
+  "cape town": "ZA",
+  "durban": "ZA",
+  "pretoria": "ZA",
+  "stellenbosch": "ZA",
+  "sandton": "ZA",
+  "midrand": "ZA",
+  "durbanville": "ZA",
+  "port louis": "MU",
+  "dakar": "SN",
+  "abidjan": "CI",
+  "luanda": "AO",
+  "maputo": "MZ",
+  "gaborone": "BW",
+  "windhoek": "NA",
+  "antananarivo": "MG",
+  // East and South-East Asia
+  "beijing": "CN",
+  "peking": "CN",
+  "shanghai": "CN",
+  "shenzhen": "CN",
+  "guangzhou": "CN",
+  "hangzhou": "CN",
+  "chengdu": "CN",
+  "nanjing": "CN",
+  "wuhan": "CN",
+  "suzhou": "CN",
+  "xian": "CN",
+  "xi an": "CN",
+  "tianjin": "CN",
+  "chongqing": "CN",
+  "qingdao": "CN",
+  "dalian": "CN",
+  "xiamen": "CN",
+  "dongguan": "CN",
+  "ningbo": "CN",
+  "hefei": "CN",
+  "zhengzhou": "CN",
+  "changsha": "CN",
+  "kunming": "CN",
+  "harbin": "CN",
+  "shenyang": "CN",
+  "jinan": "CN",
+  "fuzhou": "CN",
+  "wuxi": "CN",
+  "taipei": "TW",
+  "new taipei": "TW",
+  "taichung": "TW",
+  "kaohsiung": "TW",
+  "tainan": "TW",
+  "hsinchu": "TW",
+  "seoul": "KR",
+  "busan": "KR",
+  "incheon": "KR",
+  "daegu": "KR",
+  "daejeon": "KR",
+  "gwangju": "KR",
+  "suwon": "KR",
+  "pangyo": "KR",
+  "seongnam": "KR",
+  "bundang": "KR",
+  "manila": "PH",
+  "makati": "PH",
+  "taguig": "PH",
+  "bonifacio global city": "PH",
+  "bgc": "PH",
+  "quezon city": "PH",
+  "pasig": "PH",
+  "cebu": "PH",
+  "cebu city": "PH",
+  "davao": "PH",
+  "davao city": "PH",
+  "ortigas": "PH",
+  "bangkok": "TH",
+  "chiang mai": "TH",
+  "phuket": "TH",
+  "pattaya": "TH",
+  "kuala lumpur": "MY",
+  "petaling jaya": "MY",
+  "cyberjaya": "MY",
+  "johor bahru": "MY",
+  "shah alam": "MY",
+  "subang jaya": "MY",
+  "penang": "MY",
+  "jakarta": "ID",
+  "surabaya": "ID",
+  "bandung": "ID",
+  "bali": "ID",
+  "denpasar": "ID",
+  "yogyakarta": "ID",
+  "medan": "ID",
+  "semarang": "ID",
+  "makassar": "ID",
+  "batam": "ID",
+  "tangerang": "ID",
+  "bekasi": "ID",
+  "bogor": "ID",
+  "depok": "ID",
+  "hanoi": "VN",
+  "ha noi": "VN",
+  "ho chi minh city": "VN",
+  "ho chi minh": "VN",
+  "hcmc": "VN",
+  "saigon": "VN",
+  "da nang": "VN",
+  "danang": "VN",
+  "phnom penh": "KH",
+  "vientiane": "LA",
+  "yangon": "MM",
+  "colombo": "LK",
+  "dhaka": "BD",
+  "chittagong": "BD",
+  "chattogram": "BD",
+  "karachi": "PK",
+  "lahore": "PK",
+  "islamabad": "PK",
+  "rawalpindi": "PK",
+  "faisalabad": "PK",
+  "peshawar": "PK",
+  "kathmandu": "NP",
+  "thimphu": "BT",
+  "ulaanbaatar": "MN",
+  "almaty": "KZ",
+  "astana": "KZ",
+  "nur sultan": "KZ",
+  "tashkent": "UZ",
+  "bishkek": "KG",
+  "dushanbe": "TJ",
+  "ashgabat": "TM",
+  "baku": "AZ",
+  "yerevan": "AM",
+  "tbilisi": "GE",
+  // Americas
+  "mexico city": "MX",
+  "ciudad de mexico": "MX",
+  "cdmx": "MX",
+  "guadalajara": "MX",
+  "monterrey": "MX",
+  "queretaro": "MX",
+  "tijuana": "MX",
+  "puebla": "MX",
+  "cancun": "MX",
+  "hermosillo": "MX",
+  "chihuahua": "MX",
+  "aguascalientes": "MX",
+  "san luis potosi": "MX",
+  "toluca": "MX",
+  "ciudad juarez": "MX",
+  "juarez": "MX",
+  "mexicali": "MX",
+  "saltillo": "MX",
+  "zapopan": "MX",
+  "guatemala city": "GT",
+  "ciudad de guatemala": "GT",
+  "san salvador": "SV",
+  "tegucigalpa": "HN",
+  "san pedro sula": "HN",
+  "managua": "NI",
+  "havana": "CU",
+  "la habana": "CU",
+  "santo domingo": "DO",
+  "port au prince": "HT",
+  "port of spain": "TT",
+  "bridgetown": "BB",
+  "bogota": "CO",
+  "medellin": "CO",
+  "barranquilla": "CO",
+  "bucaramanga": "CO",
+  "pereira": "CO",
+  "caracas": "VE",
+  "maracaibo": "VE",
+  "quito": "EC",
+  "guayaquil": "EC",
+  "arequipa": "PE",
+  "cusco": "PE",
+  "cuzco": "PE",
+  "cochabamba": "BO",
+  "vina del mar": "CL",
+  "concepcion": "CL",
+  "buenos aires": "AR",
+  "rosario": "AR",
+  "mendoza": "AR",
+  "mar del plata": "AR",
+  "montevideo": "UY",
+  "asuncion": "PY",
+  "sao paulo": "BR",
+  "rio de janeiro": "BR",
+  "belo horizonte": "BR",
+  "brasilia": "BR",
+  "curitiba": "BR",
+  "porto alegre": "BR",
+  "recife": "BR",
+  "salvador": "BR",
+  "fortaleza": "BR",
+  "campinas": "BR",
+  "florianopolis": "BR",
+  "manaus": "BR",
+  "belem": "BR",
+  "goiania": "BR",
+  "barueri": "BR",
+  "osasco": "BR",
+  "sao jose dos campos": "BR",
+  "joinville": "BR",
+  "blumenau": "BR",
+  "ribeirao preto": "BR",
+  "sorocaba": "BR",
+  "santos": "BR",
+  "niteroi": "BR",
+  "uberlandia": "BR",
+  "londrina": "BR",
+  "maringa": "BR",
+  "alphaville": "BR",
+  // Oceania outside Australia
+  "auckland": "NZ",
+  "christchurch": "NZ",
+  "dunedin": "NZ",
+  "tauranga": "NZ",
+  "suva": "FJ",
+  "port moresby": "PG",
+  "noumea": "NC"
+};
+var remoteWordPattern = "(?:fully\\s+|100%\\s+|full\\s+|partially\\s+|mostly\\s+)?(?:remote|remoto|remota|teletrabajo|teletravail|t\xE9l\xE9travail|hybrid|hibrido|h\xEDbrido|home[\\s-]?based|home[\\s-]?office|work[\\s-]+from[\\s-]+home|wfh|telecommute|telework|virtual|distributed|on[\\s-]?site|in[\\s-]?office|office[\\s-]?based|flexible)(?:[\\s-]+(?:work|working|role|roles|position|job|jobs|eligible|friendly|first|ok|okay|possible|available|option|optional|only|allowed))?";
+var regionScopeLabels = [
+  "emea",
+  "apac",
+  "apj",
+  "latam",
+  "lat am",
+  "amer",
+  "amers",
+  "namer",
+  "na",
+  "eu",
+  "europe",
+  "european union",
+  "eu uk",
+  "uk eu",
+  "asia",
+  "asia pacific",
+  "asia pac",
+  "asiapac",
+  "africa",
+  "americas",
+  "north america",
+  "south america",
+  "latin america",
+  "central america",
+  "caribbean",
+  "middle east",
+  "mena",
+  "menat",
+  "gcc",
+  "nordics",
+  "nordic",
+  "scandinavia",
+  "benelux",
+  "dach",
+  "cee",
+  "cis",
+  "anz",
+  "oceania",
+  "australasia",
+  "eastern europe",
+  "western europe",
+  "southern europe",
+  "northern europe",
+  "central europe",
+  "southeast asia",
+  "south east asia",
+  "south asia",
+  "east asia",
+  "sub saharan africa",
+  "west africa",
+  "east africa",
+  "north africa",
+  "southern africa",
+  "global",
+  "worldwide",
+  "world wide",
+  "international",
+  "anywhere",
+  "anywhere in the world",
+  "multiple locations",
+  "multiple",
+  "various",
+  "various locations",
+  "other",
+  "tbd",
+  "tbc",
+  "location tbd",
+  "to be determined",
+  "n a",
+  "none",
+  "unknown",
+  "flexible",
+  "distributed",
+  "us timezones",
+  "us time zones",
+  "est",
+  "pst",
+  "cst",
+  "mst",
+  "cet",
+  "gmt",
+  "utc",
+  "east coast",
+  "west coast",
+  "midwest",
+  "southeast",
+  "northeast",
+  "southwest",
+  "northwest",
+  "pacific",
+  "atlantic",
+  "select locations",
+  "all locations",
+  "any",
+  "any location",
+  "open",
+  "everywhere",
+  "home",
+  "field",
+  "travel",
+  "traveling",
+  "travelling",
+  "nationwide",
+  "national",
+  "regional",
+  "onsite",
+  "on site",
+  "hybrid",
+  "remote"
+];
+
+// src/location-country.ts
+var markets2 = new Set(supportedMarketCodes);
+function normalizeLocationSegment(value) {
+  return value.normalize("NFKC").toLocaleLowerCase("en-US").normalize("NFD").replace(/[̀-ͯ]/g, "").normalize("NFC").replace(/&/g, " and ").replace(/[.'’`]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+var marketShortLabels = {
+  us: "US",
+  usa: "US",
+  "u s": "US",
+  "u s a": "US",
+  "united states": "US",
+  "united states of america": "US",
+  "the united states": "US",
+  "the us": "US",
+  "the usa": "US",
+  uk: "GB",
+  "u k": "GB",
+  gb: "GB",
+  gbr: "GB",
+  "united kingdom": "GB",
+  "great britain": "GB",
+  "the uk": "GB",
+  "the united kingdom": "GB",
+  can: "CA",
+  canada: "CA",
+  au: "AU",
+  aus: "AU",
+  australia: "AU",
+  sg: "SG",
+  sgp: "SG",
+  singapore: "SG",
+  jp: "JP",
+  jpn: "JP",
+  japan: "JP",
+  india: "IN"
+};
+var worldCountries = /* @__PURE__ */ new Map();
+{
+  const display = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" });
+  const deprecated = new Set("AC AN BU CP CS DD DG EA EU EZ FX IC NT QO SU TA TP UN XA XB YD YU ZR ZZ".split(" "));
+  for (let a = 65; a <= 90; a++)
+    for (let b = 65; b <= 90; b++) {
+      const code = String.fromCharCode(a, b);
+      const name = deprecated.has(code) || markets2.has(code) ? null : display.of(code);
+      if (name && name !== code) worldCountries.set(normalizeLocationSegment(name), code);
+    }
+  for (const [alias, code] of Object.entries(worldCountryAliases)) if (!markets2.has(code)) worldCountries.set(normalizeLocationSegment(alias), code);
+  for (const name of worldCountryBlocklist) worldCountries.delete(normalizeLocationSegment(name));
+}
+var worldCityTable = new Map(Object.entries(worldCities).map(([name, code]) => [normalizeLocationSegment(name), code]));
+var regionScope = new Set(regionScopeLabels.map(normalizeLocationSegment));
+var marketRegionCodes = new Set(supportedMarketCodes.flatMap((code) => gazetteerSource[code].regionCodes));
+var remoteWord = new RegExp(remoteWordPattern, "iu");
+var leadingRemote = new RegExp(`^${remoteWordPattern}\\s*(?:in|from|within|across|throughout|based\\s+in|based|only|-|\u2013|\u2014|:|,)?\\s*(?:the\\s+)?`, "iu");
+var trailingRemote = new RegExp(`\\s*(?:-|\u2013|\u2014|,|\\|)?\\s*\\(?\\s*${remoteWordPattern}\\s*\\)?\\s*$`, "iu");
+var leadingBased = /^(?:based\s+in|located\s+in|office\s+in|offices\s+in|anywhere\s+in|based|located|in)\s+(?:the\s+)?/iu;
+var trailingSite = /\s+(?:office|offices|hq|headquarters|campus|site|plant|branch|hub|studio|lab|labs|center|centre)$/iu;
+var districtNumber = /^\d{3,7}\s+|\s+\d{1,7}$/gu;
+var negative3 = /\b(?:not|except|excluding|excluded|outside|sauf|hors|exclu(?:e|s|es)?)\b|以外|除外|対象外|除く|不包括|不含|बाहर/iu;
+var unitSplit = /[;|\n]+|\s*\/\s*/u;
+var segmentSplit = /[,()（）、:>]+|\s+[-–—]+\s+|\s+(?:or|and|&|\+)\s+/iu;
+var quoteOf2 = (unit) => unit.trim().replace(/\s+/g, " ").slice(0, 200);
+function stripRemote(segment) {
+  let core = segment.trim();
+  let remote = false;
+  for (let pass = 0; pass < 2; pass++) {
+    const before = core;
+    core = core.replace(leadingRemote, "").trim();
+    core = core.replace(trailingRemote, "").trim();
+    if (core !== before) remote = true;
+  }
+  core = core.replace(leadingBased, "").trim().replace(/^[-–—:\s]+|[-–—:\s]+$/g, "");
+  core = core.replace(trailingSite, "").replace(districtNumber, "").trim();
+  if (!remote && remoteWord.test(segment)) remote = true;
+  return { core, remote };
+}
+function readUnit(unit) {
+  const quote = quoteOf2(unit);
+  const reading = { quote, remote: false, region: false, regionQuote: null, marketCoded: false, explicit: [], world: [] };
+  const denied = negative3.test(unit);
+  for (const rawSegment of unit.split(segmentSplit)) {
+    const segment = rawSegment.trim().replace(/^[-–—\s]+|[-–—\s]+$/g, "");
+    if (!segment) continue;
+    const { core, remote } = stripRemote(segment);
+    if (remote) reading.remote = true;
+    const norm = normalizeLocationSegment(core);
+    if (!norm) continue;
+    if (/^[A-Z]{2,3}$/.test(core.normalize("NFKC").replace(/\./g, "")) && marketRegionCodes.has(core.normalize("NFKC").replace(/\./g, ""))) reading.marketCoded = true;
+    if (denied) continue;
+    const market = explicitCountryAlias(core) ?? marketShortLabels[norm] ?? null;
+    if (market) {
+      reading.explicit.push({ country: market, quote, confidence: "high", kind: "explicit", method: remote ? "remote-country" : "explicit-label" });
+      continue;
+    }
+    const country = worldCountries.get(norm);
+    if (country) {
+      reading.world.push({ country, quote, confidence: "high", kind: "world-country", method: "world-country", segment: core });
+      continue;
+    }
+    const city = worldCityTable.get(norm);
+    if (city) {
+      reading.world.push({ country: city, quote, confidence: "medium", kind: "world-city", method: "world-city", segment: core });
+      continue;
+    }
+    if (regionScope.has(norm)) {
+      reading.region = true;
+      reading.regionQuote ??= quote;
+    }
+  }
+  return reading;
+}
+function resolveLocationCountries(locations) {
+  const result = { countries: [], method: null, evidence: [], excluded: [], ambiguous: [], conflict: false, location_scope: null, scope_quote: null, unresolved_reason: null };
+  const labels = (Array.isArray(locations) ? locations : []).filter((value) => typeof value === "string" && Boolean(value.trim()));
+  if (!labels.length) {
+    result.unresolved_reason = "empty";
+    return result;
+  }
+  const excluded = /* @__PURE__ */ new Set();
+  const ambiguous = /* @__PURE__ */ new Set();
+  let sawRemote = false, sawRegion = false, regionQuote = null, resolvedRemote = false;
+  const push = (item) => {
+    const { segment: _segment, ...clean2 } = item;
+    item = clean2;
+    result.evidence.push(item);
+    if (!result.countries.includes(item.country)) result.countries.push(item.country);
+  };
+  for (const label2 of labels) {
+    for (const rawUnit of label2.normalize("NFKC").split(unitSplit)) {
+      const unit = rawUnit.trim();
+      if (!unit) continue;
+      const reading = readUnit(unit);
+      const labelEvidence = locationCountryEvidence([unit]);
+      for (const code of labelEvidence.excludedCountries) excluded.add(code);
+      const gazetteer = gazetteerCountryEvidence(unit);
+      for (const name of gazetteer.ambiguous) ambiguous.add(name);
+      if (reading.remote) sawRemote = true;
+      if (reading.region) {
+        sawRegion = true;
+        regionQuote ??= reading.regionQuote;
+      }
+      const explicit = [...reading.explicit];
+      for (const code of labelEvidence.countries)
+        if (!explicit.some((item) => item.country === code)) explicit.push({ country: code, quote: reading.quote, confidence: "high", kind: "explicit", method: reading.remote ? "remote-country" : "explicit-label" });
+      const explicitCodes = new Set(explicit.map((item) => item.country));
+      const gazetteerItems = gazetteer.conflict ? [] : gazetteer.matches.map((match) => ({ country: match.country, quote: reading.quote, confidence: match.confidence, kind: match.kind, method: "gazetteer" }));
+      let marketItems = gazetteer.conflict ? explicit : [...explicit, ...gazetteerItems];
+      marketItems = marketItems.filter((item) => !excluded.has(item.country));
+      if (!explicit.length && gazetteer.conflict) {
+        result.conflict = true;
+        continue;
+      }
+      const unitCountries = /* @__PURE__ */ new Set();
+      const add = (item) => {
+        if (result.evidence.some((seen) => seen.country === item.country && seen.quote === item.quote && seen.kind === item.kind)) {
+          unitCountries.add(item.country);
+          return;
+        }
+        push(reading.remote ? { ...item, remote: true } : item);
+        unitCountries.add(item.country);
+      };
+      for (const item of marketItems) add(item);
+      const gazetteerTokens = new Set(gazetteer.matches.map((match) => normalizeLocationSegment(match.token)));
+      const worldCountriesHere = gazetteer.countries.length ? [] : reading.world.filter((item) => item.kind === "world-country" && !gazetteerTokens.has(normalizeLocationSegment(item.segment)));
+      const worldCitiesHere = marketItems.length || worldCountriesHere.length || reading.marketCoded || gazetteer.ambiguous.length ? [] : reading.world.filter((item) => item.kind === "world-city");
+      const world = worldCountriesHere.length ? worldCountriesHere : worldCitiesHere;
+      if (new Set(world.map((item) => item.country)).size > 1) {
+        result.conflict = true;
+        continue;
+      }
+      for (const item of world) add(item);
+      if (unitCountries.size && reading.remote) resolvedRemote = true;
+    }
+  }
+  result.excluded = [...excluded];
+  result.ambiguous = [...ambiguous];
+  result.method = result.evidence[0]?.method ?? null;
+  if (result.countries.length) {
+    if (resolvedRemote) result.location_scope = "remote-country";
+    return result;
+  }
+  if (sawRegion) {
+    result.location_scope = "region";
+    result.scope_quote = regionQuote;
+    result.unresolved_reason = "region";
+  } else if (result.conflict) result.unresolved_reason = "conflict";
+  else if (ambiguous.size) result.unresolved_reason = "ambiguous";
+  else if (sawRemote && labels.every((label2) => !normalizeLocationSegment(stripRemote(label2).core))) result.unresolved_reason = "bare-remote";
+  else result.unresolved_reason = "unknown";
+  return result;
+}
+function locationCountryEvidenceFields(resolution) {
+  return {
+    ...resolution.countries.length ? { country_method: resolution.method, location_evidence: resolution.evidence } : {},
+    ...resolution.ambiguous.length ? { gazetteer_ambiguous: resolution.ambiguous } : {},
+    ...resolution.conflict ? { gazetteer_conflict: true } : {},
+    ...resolution.excluded.length ? { excluded_countries: resolution.excluded } : {},
+    ...resolution.location_scope ? { location_scope: resolution.location_scope } : {},
+    ...resolution.scope_quote ? { location_scope_quote: resolution.scope_quote } : {},
+    ...!resolution.countries.length && resolution.unresolved_reason ? { location_unresolved: resolution.unresolved_reason } : {}
+  };
+}
+
+// src/board-scheduling.ts
+var BIG_THREE = ["greenhouse", "lever", "ashby"];
+function shardSources(shard, all) {
+  const key = (shard ?? "").trim().toLowerCase();
+  if (!key || key === "all") return [...all];
+  if (key === "others") return all.filter((s) => !BIG_THREE.includes(s));
+  const wanted = key.split(",").map((s) => s.trim()).filter(Boolean);
+  return all.filter((s) => wanted.includes(s));
+}
+function claimSources(input) {
+  let sources = shardSources(input.shard, input.all);
+  const filter = (input.atsFilter ?? "all").trim().toLowerCase();
+  if (filter && filter !== "all") sources = sources.filter((s) => s === filter);
+  if (!input.usajobs) sources = sources.filter((s) => s !== "usajobs");
+  return sources;
+}
+function isMissingRpc(error) {
+  if (!error) return false;
+  if (error.code === "PGRST202" || error.code === "42883") return true;
+  return /could not find the function|function .* does not exist/i.test(error.message ?? "");
+}
+function passRunKey(env, shard, uuid) {
+  const run2 = env.GITHUB_RUN_ID?.trim();
+  if (!run2) return uuid();
+  const attempt = env.GITHUB_RUN_ATTEMPT?.trim() || "1";
+  const key = (shard ?? "").trim().toLowerCase();
+  return key && key !== "all" ? `${run2}-${attempt}-${key}` : `${run2}-${attempt}`;
+}
+function createClaimQueue(options) {
+  const now = options.now ?? Date.now;
+  const started = now();
+  const queue = [];
+  let claimed = 0, claims = 0, stoppedBy = null, error = null, inflight = null;
+  const cap = Math.max(1, Math.floor(options.cap));
+  const batch = Math.max(1, Math.floor(options.batch));
+  if (options.initial) {
+    claims = 1;
+    claimed = options.initial.length;
+    queue.push(...options.initial);
+    if (!options.initial.length) stoppedBy = "empty";
+    else if (claimed >= cap) stoppedBy = "cap";
+  }
+  async function refill() {
+    if (stoppedBy) return;
+    if (claimed >= cap) {
+      stoppedBy = "cap";
+      return;
+    }
+    if (now() - started >= options.budgetMs) {
+      stoppedBy = "budget";
+      return;
+    }
+    let rows;
+    try {
+      rows = await options.claim(Math.min(batch, cap - claimed));
+    } catch (e) {
+      stoppedBy = "error";
+      error = e instanceof Error ? e.message : String(e);
+      return;
+    }
+    claims++;
+    if (!rows.length) {
+      stoppedBy = "empty";
+      return;
+    }
+    claimed += rows.length;
+    queue.push(...rows);
+    if (claimed >= cap) stoppedBy = "cap";
+  }
+  return {
+    async next() {
+      for (; ; ) {
+        const item = queue.shift();
+        if (item !== void 0) return item;
+        if (stoppedBy) return null;
+        if (!inflight)
+          inflight = refill().finally(() => {
+            inflight = null;
+          });
+        await inflight;
+      }
+    },
+    stats: () => ({ claimed, claims, stoppedBy, error, elapsedMs: now() - started })
+  };
 }
 
 // src/run.ts
@@ -25868,6 +29695,11 @@ var PILOT = process.env.COLLECT_PILOT === "1";
 var BATCH_MAX_ROWS = Math.min(100, Math.max(1, Number(process.env.COLLECT_BATCH_ROWS ?? 50) || 50));
 var STORE_SNAPSHOTS = process.env.COLLECT_STORE_SNAPSHOTS === "1";
 var BATCH_MAX_BYTES = Math.min(8 * 1024 * 1024, Math.max(65536, Number(process.env.COLLECT_BATCH_BYTES ?? 1048576) || 1048576));
+var BOARD_CAP = Math.max(1, Math.floor(Number(process.env.COLLECT_BOARD_CAP ?? 4e3) || 4e3));
+var PASS_BUDGET_SECONDS = Math.max(30, Number(process.env.COLLECT_PASS_BUDGET_SECONDS ?? 900) || 900);
+var LEASE_SECONDS = Math.min(14400, Math.max(60, Math.floor(Number(process.env.COLLECT_LEASE_SECONDS ?? 1800) || 1800)));
+var CLAIM_BATCH = Math.min(500, Math.max(8, Math.floor(Number(process.env.COLLECT_CLAIM_BATCH ?? 64) || 64)));
+var ATS_SHARD = (process.env.COLLECT_ATS_SHARD ?? "all").toLowerCase();
 var INTERN_RE = /\bintern(ship)?s?\b|\bco[- ]?op\b|\bapprentice(ship)?\b/i;
 var NEWGRAD_RE = /\bnew ?grad(uate)?\b|\buniversity grad(uate)?\b|\brecent grad(uate)?\b|\bcampus hire\b|\bgraduate (program|scheme|engineer|analyst)\b|\bclass of 20\d\d\b|\bearly career\b/i;
 var TERM_RE = /\b(summer|fall|spring|winter)\s*'?(20)?(2[5-9])\b/gi;
@@ -26045,10 +29877,13 @@ async function seed() {
         if (!(seen > restampBase)) restamp.push(previous.id);
         continue;
       }
+      const country = resolveLocationCountries(content.locations);
       rows.push({
         source: s.source,
         source_uid: l.id,
         ...content,
+        country_codes: country.countries,
+        country_evidence: { source: "seed-list", ...locationCountryEvidenceFields(country) },
         classify_source: "seed",
         source_content_sha256: sha,
         source_checked_at: checkedAt,
@@ -26072,30 +29907,69 @@ async function seed() {
     );
   }
 }
+var BOARD_COLUMNS = "id,name,ats,board_token,board_url,tier";
 async function poll() {
-  const boards = await pageAll(
-    "ats_companies",
-    "id,name,ats,board_token,board_url,tier",
-    (q) => q.in("ats", [...PRIMARY_ATS]).in("verify_status", ["active", "empty"])
-  );
-  boards.sort(
-    (a, b) => Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven")
-  );
-  let selected = boards.filter(
-    (b) => (ATS_FILTER === "all" || b.ats === ATS_FILTER) && (TIER_FILTER === "all" || b.tier === TIER_FILTER)
-  );
+  const startedAt = /* @__PURE__ */ new Date();
   const usajobs = usajobsCredentials();
-  if (!usajobs && selected.some((b) => b.ats === "usajobs")) {
-    console.warn(
-      `usajobs: ${selected.filter((b) => b.ats === "usajobs").length} board(s) skipped \u2014 USAJOBS_API_KEY and USAJOBS_USER_AGENT are not set`
-    );
-    selected = selected.filter((b) => b.ats !== "usajobs");
-  }
-  if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
+  const runKey = passRunKey(process.env, ATS_SHARD, import_node_crypto2.randomUUID);
+  const sources = claimSources({ shard: ATS_SHARD, atsFilter: ATS_FILTER, all: PRIMARY_ATS, usajobs: Boolean(usajobs) });
+  if (!usajobs && shardSources(ATS_SHARD, PRIMARY_ATS).includes("usajobs") && (ATS_FILTER === "all" || ATS_FILTER === "usajobs"))
+    console.warn("usajobs: boards skipped \u2014 USAJOBS_API_KEY and USAJOBS_USER_AGENT are not set");
+  const cap = BOARD_LIMIT > 0 ? Math.min(BOARD_LIMIT, BOARD_CAP) : BOARD_CAP;
   console.log(
-    `boards: ${selected.length} selected of ${boards.length} (ats=${ATS_FILTER}, tier=${TIER_FILTER}, limit=${BOARD_LIMIT || "none"})`
+    `pass ${runKey}: shard=${ATS_SHARD} sources=${sources.join(",") || "none"} ats=${ATS_FILTER} tier=${TIER_FILTER} cap=${cap} budget=${PASS_BUDGET_SECONDS}s lease=${LEASE_SECONDS}s batch=${CLAIM_BATCH}`
   );
-  const queue = [...selected], stats = { completed: 0, failed: 0, postings: 0 }, measure = {
+  if (!sources.length) {
+    console.log("boards: nothing to claim for this shard/filter");
+    return;
+  }
+  const claim = async (limit) => {
+    const { data, error } = await supabase.rpc("claim_due_boards", {
+      p_limit: limit,
+      p_lease_seconds: LEASE_SECONDS,
+      p_owner: runKey,
+      p_ats: sources.join(",")
+    });
+    if (error) throw Object.assign(new Error(`claim_due_boards: ${error.message}`), { code: error.code });
+    return (data ?? []).filter((b) => isPrimaryAts(b.ats));
+  };
+  let scheduled = TIER_FILTER === "all";
+  let initial = [];
+  if (scheduled) {
+    try {
+      initial = await claim(Math.min(CLAIM_BATCH, cap));
+    } catch (error) {
+      if (!isMissingRpc(error)) throw error;
+      scheduled = false;
+      console.warn(
+        "claim_due_boards is not available (migration 20260917120000 not applied) \u2014 polling every active/empty board this pass without leases"
+      );
+    }
+  } else console.log(`tier filter ${TIER_FILTER}: legacy selection without leases or schedule updates`);
+  let next;
+  let queueStats;
+  if (scheduled) {
+    const claimQueue = createClaimQueue({ claim, cap, budgetMs: PASS_BUDGET_SECONDS * 1e3, batch: CLAIM_BATCH, initial });
+    next = claimQueue.next;
+    queueStats = claimQueue.stats;
+  } else {
+    const boards = await pageAll(
+      "ats_companies",
+      BOARD_COLUMNS,
+      (q) => q.in("ats", sources).in("verify_status", ["active", "empty"])
+    );
+    boards.sort((a, b) => Number(b.tier === "intern-proven") - Number(a.tier === "intern-proven"));
+    let selected = boards.filter((b) => TIER_FILTER === "all" || b.tier === TIER_FILTER);
+    if (BOARD_LIMIT > 0) selected = selected.slice(0, BOARD_LIMIT);
+    console.log(`boards: ${selected.length} selected of ${boards.length} (legacy selection, limit=${BOARD_LIMIT || "none"})`);
+    const legacyStart = Date.now();
+    const legacyQueue = [...selected];
+    next = async () => legacyQueue.shift() ?? null;
+    queueStats = () => ({ claimed: selected.length, claims: 0, stoppedBy: null, error: null, elapsedMs: Date.now() - legacyStart });
+  }
+  const perSource = {};
+  let scheduleErrors = 0;
+  const stats = { completed: 0, failed: 0, postings: 0 }, measure = {
     sourceBytes: 0,
     descriptionChars: 0,
     withDescription: 0,
@@ -26104,6 +29978,7 @@ async function poll() {
     typedFromText: 0,
     withCountry: 0,
     countryFromGazetteer: 0,
+    countryFromLabels: 0,
     batches: 0,
     splits: 0,
     skippedMalformed: 0,
@@ -26122,10 +29997,12 @@ async function poll() {
   }
   const worker = async () => {
     for (; ; ) {
-      const board = queue.shift();
+      const board = await next();
       if (!board) return;
       const runId = (0, import_node_crypto2.randomUUID)();
-      let started = false;
+      const tally = perSource[board.ats] ??= { boards: 0, failed: 0, written: 0, closed: 0, missed: 0 };
+      tally.boards++;
+      let started = false, written = 0, closed = 0, missed = 0, failed = false;
       try {
         await rpc("begin_corpus_collection", {
           p_company_id: board.id,
@@ -26160,19 +30037,9 @@ async function poll() {
           let country_codes = job.country_codes;
           let country_evidence = job.country_evidence;
           if (!country_codes.length && job.locations.length) {
-            const gazetteer = gazetteerCountryEvidence(job.locations.join(" ; "));
-            const combined = combineCountryEvidence(job.country_codes, gazetteer);
-            if (combined.length) {
-              country_codes = combined;
-              country_evidence = {
-                ...country_evidence,
-                gazetteer: gazetteer.matches,
-                gazetteer_ambiguous: gazetteer.ambiguous,
-                country_method: "gazetteer"
-              };
-            } else if (gazetteer.ambiguous.length || gazetteer.conflict) {
-              country_evidence = { ...country_evidence, gazetteer_ambiguous: gazetteer.ambiguous, gazetteer_conflict: gazetteer.conflict };
-            }
+            const resolved = resolveLocationCountries(job.locations);
+            if (resolved.countries.length) country_codes = resolved.countries;
+            country_evidence = { ...country_evidence, ...locationCountryEvidenceFields(resolved) };
           }
           const { source_record_json, ...withoutRaw } = job;
           return {
@@ -26198,6 +30065,7 @@ async function poll() {
             }
             if (row.country_codes.length) measure.withCountry++;
             if (row.country_evidence.country_method === "gazetteer") measure.countryFromGazetteer++;
+            if (row.country_evidence.location_evidence) measure.countryFromLabels++;
           }
         let batchIndex = 0;
         const applyRows = async (slice) => {
@@ -26214,6 +30082,7 @@ async function poll() {
             measure.dbMs += Date.now() - dbStart;
             measure.batches++;
             measure.written += applied?.written ?? 0;
+            written += applied?.written ?? 0;
             measure.unchanged += applied?.unchanged ?? 0;
             measure.bumped += applied?.bumped ?? 0;
           } catch (error) {
@@ -26241,7 +30110,7 @@ async function poll() {
           offset = end;
         }
         const finishStart = Date.now();
-        await rpc("finish_corpus_collection", {
+        const finished = await rpc("finish_corpus_collection", {
           p_run_id: runId,
           p_expected_count: rows.length,
           p_checked_at: snapshot.checkedAt,
@@ -26249,14 +30118,21 @@ async function poll() {
           p_error_code: null
         });
         measure.dbMs += Date.now() - finishStart;
+        closed = finished?.closed ?? 0;
+        missed = finished?.firstMiss ?? 0;
         stats.completed++;
         stats.postings += rows.length;
+        tally.written += written;
+        tally.closed += closed;
+        tally.missed += missed;
         if ((stats.completed + stats.failed) % 250 === 0)
           console.log(
-            `boards:${stats.completed + stats.failed}/${selected.length} postings:${stats.postings} failed:${stats.failed}`
+            `boards:${stats.completed + stats.failed}/${queueStats().claimed} postings:${stats.postings} failed:${stats.failed}`
           );
       } catch (error) {
         stats.failed++;
+        failed = true;
+        tally.failed++;
         const code = error instanceof CollectionError ? error.code : "COLLECTION_UNAVAILABLE";
         measure.failures[code] = (measure.failures[code] ?? 0) + 1;
         console.warn("Board collection failed", {
@@ -26279,10 +30155,33 @@ async function poll() {
             });
           }
       }
+      if (scheduled) {
+        const { error } = await supabase.rpc("finish_board_poll", {
+          p_board_id: board.id,
+          p_owner: runKey,
+          p_changed: written > 0 || closed > 0 || missed > 0,
+          p_failed: failed
+        });
+        if (error) {
+          scheduleErrors++;
+          if (scheduleErrors <= 3)
+            console.warn("finish_board_poll failed", { boardId: board.id, code: error.code, message: error.message });
+        }
+      }
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-  console.log("Collection complete", stats);
+  const completedAt = /* @__PURE__ */ new Date();
+  const claimed = queueStats();
+  console.log("Collection complete", {
+    ...stats,
+    claimed: claimed.claimed,
+    claims: claimed.claims,
+    stoppedBy: claimed.stoppedBy,
+    claimError: claimed.error,
+    scheduleErrors,
+    seconds: Math.round((completedAt.getTime() - startedAt.getTime()) / 1e3)
+  });
   if (PILOT)
     console.log(
       "PILOT_SUMMARY " + JSON.stringify({
@@ -26292,12 +30191,100 @@ async function poll() {
         avgDescriptionChars: stats.postings ? Math.round(measure.descriptionChars / stats.postings) : 0
       })
     );
-  const tolerated = Math.max(3, Math.floor(selected.length * 0.05));
+  await recordPass({ runKey, startedAt, completedAt, sources, perSource, failures: measure.failures, stats });
+  const tolerated = Math.max(3, Math.floor((stats.completed + stats.failed) * 0.05));
   if (stats.failed > tolerated) {
     console.error(`Run failed: ${stats.failed} boards failed (tolerated ${tolerated})`);
     process.exitCode = 1;
   } else if (stats.failed) {
     console.warn(`${stats.failed} board(s) failed and will be retried next cycle`);
+  }
+}
+async function passEventCounts(sources, from, to) {
+  const counts = {};
+  let rows = 0;
+  for (let page = 0; page < 100; page++) {
+    const { data, error } = await supabase.from("corpus_events").select("event,corpus_listings!inner(source)").gte("at", from.toISOString()).lte("at", to.toISOString()).in("corpus_listings.source", sources).order("at", { ascending: true }).order("id", { ascending: true }).range(page * 1e3, page * 1e3 + 999);
+    if (error) throw new Error(`corpus_events: ${error.message}`);
+    const batch = data ?? [];
+    for (const row of batch) {
+      const source = row.corpus_listings?.source;
+      if (!source) continue;
+      const tally = counts[source] ??= { new: 0, updated: 0, reopened: 0, closed: 0 };
+      if (row.event === "new" || row.event === "updated" || row.event === "reopened" || row.event === "closed") tally[row.event]++;
+    }
+    rows += batch.length;
+    if (batch.length < 1e3) return { counts, rows, truncated: false };
+  }
+  return { counts, rows, truncated: true };
+}
+async function recordPass(input) {
+  try {
+    let events = null;
+    try {
+      events = await passEventCounts(input.sources, input.startedAt, input.completedAt);
+    } catch (error2) {
+      console.warn("pass summary: event split unavailable; 'new' carries every written row", {
+        message: error2 instanceof Error ? error2.message : String(error2)
+      });
+    }
+    const sourcesJson = {};
+    const totals = { boards: 0, failed: 0, new: 0, updated: 0, reopened: 0, closed: 0, written: 0 };
+    for (const [source, tally] of Object.entries(input.perSource)) {
+      const split = events?.counts[source];
+      const row = {
+        boards: tally.boards,
+        failed: tally.failed,
+        new: split ? split.new : tally.written,
+        updated: split ? split.updated : 0,
+        reopened: split ? split.reopened : 0,
+        closed: tally.closed,
+        written: tally.written
+      };
+      sourcesJson[source] = row;
+      totals.boards += row.boards;
+      totals.failed += row.failed;
+      totals.new += row.new;
+      totals.updated += row.updated;
+      totals.reopened += row.reopened;
+      totals.closed += row.closed;
+      totals.written += row.written;
+    }
+    console.log(
+      "PASS_SUMMARY " + JSON.stringify({
+        run_key: input.runKey,
+        started_at: input.startedAt.toISOString(),
+        completed_at: input.completedAt.toISOString(),
+        ...totals,
+        postings: input.stats.postings,
+        basis: events ? "events" : "rpc-written",
+        events_truncated: events?.truncated ?? null,
+        failures: input.failures,
+        sources: sourcesJson
+      })
+    );
+    const { data, error } = await supabase.rpc("record_corpus_collection_pass", {
+      p_run_key: input.runKey,
+      p_started_at: input.startedAt.toISOString(),
+      p_completed_at: input.completedAt.toISOString(),
+      p_boards: totals.boards,
+      p_failed: totals.failed,
+      p_failures: input.failures,
+      p_new: totals.new,
+      p_updated: totals.updated,
+      p_closed: totals.closed,
+      p_reopened: totals.reopened,
+      p_sources: sourcesJson
+    });
+    if (error) {
+      console.warn(
+        isMissingRpc(error) ? "record_corpus_collection_pass is not available \u2014 pass summary not recorded" : `record_corpus_collection_pass failed: ${error.message}`
+      );
+      return;
+    }
+    console.log(`pass recorded: ${String(data)}`);
+  } catch (error) {
+    console.warn("pass summary failed", { message: error instanceof Error ? error.message : String(error) });
   }
 }
 async function verify() {
@@ -26342,10 +30329,83 @@ async function probe(ats, slug, registryUrl) {
     return "unknown";
   }
 }
+var BACKFILL_WRITE = process.env.COUNTRY_BACKFILL_WRITE === "1";
+var BACKFILL_LIMIT = Math.max(1, Number(process.env.COUNTRY_BACKFILL_LIMIT ?? 5e3) || 5e3);
+var BACKFILL_PAGE = Math.min(5e3, Math.max(100, Number(process.env.COUNTRY_BACKFILL_PAGE ?? 2e3) || 2e3));
+var BACKFILL_CHUNK = 200;
+var BACKFILL_CHUNK_PAUSE_MS = 250;
+var BACKFILL_PAGE_PAUSE_MS = 1500;
+var pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function recountry() {
+  let cursor = process.env.COUNTRY_BACKFILL_AFTER?.trim() || null;
+  const stats = {
+    write: BACKFILL_WRITE,
+    pages: 0,
+    read: 0,
+    resolvable: 0,
+    written: 0,
+    bySource: {},
+    byCountry: {},
+    byMethod: {},
+    byUnresolved: {}
+  };
+  const resolvedAt = (/* @__PURE__ */ new Date()).toISOString();
+  for (; ; ) {
+    if (BACKFILL_WRITE ? stats.written >= BACKFILL_LIMIT : stats.read >= BACKFILL_LIMIT) break;
+    let q = supabase.from("corpus_listings").select("id,source,locations,country_evidence").in("status", ["active", "reopened"]).eq("is_publicly_listed", true).eq("country_codes", "{}").order("id", { ascending: true }).limit(BACKFILL_PAGE);
+    if (cursor) q = q.gt("id", cursor);
+    const { data, error } = await q;
+    if (error) throw new Error(`recountry read after ${cursor ?? "start"}: ${error.message}`);
+    const rows = data ?? [];
+    if (!rows.length) break;
+    stats.pages++;
+    stats.read += rows.length;
+    cursor = rows[rows.length - 1].id;
+    const updates = [];
+    for (const row of rows) {
+      const source = stats.bySource[row.source] ??= { read: 0, resolvable: 0 };
+      source.read++;
+      const resolution = resolveLocationCountries(Array.isArray(row.locations) ? row.locations : []);
+      if (!resolution.countries.length) {
+        const reason = resolution.unresolved_reason ?? "unknown";
+        stats.byUnresolved[reason] = (stats.byUnresolved[reason] ?? 0) + 1;
+        continue;
+      }
+      source.resolvable++;
+      stats.resolvable++;
+      for (const code of resolution.countries) stats.byCountry[code] = (stats.byCountry[code] ?? 0) + 1;
+      const method = resolution.method ?? "unknown";
+      stats.byMethod[method] = (stats.byMethod[method] ?? 0) + 1;
+      updates.push({
+        id: row.id,
+        locations: row.locations,
+        country_codes: resolution.countries,
+        country_evidence: {
+          ...row.country_evidence && typeof row.country_evidence === "object" ? row.country_evidence : {},
+          ...locationCountryEvidenceFields(resolution),
+          country_backfill: { at: resolvedAt, resolver: "location-country/2026-09-17" }
+        }
+      });
+    }
+    if (BACKFILL_WRITE) {
+      for (let offset = 0; offset < updates.length && stats.written < BACKFILL_LIMIT; offset += BACKFILL_CHUNK) {
+        const chunk = updates.slice(offset, Math.min(offset + BACKFILL_CHUNK, offset + (BACKFILL_LIMIT - stats.written)));
+        const { data: applied, error: writeError } = await supabase.rpc("apply_corpus_country_backfill", { p_rows: chunk });
+        if (writeError) throw new Error(`recountry write at ${chunk[0].id}: ${writeError.message}`);
+        stats.written += Number(applied?.updated ?? 0);
+        await pause(BACKFILL_CHUNK_PAUSE_MS);
+      }
+    }
+    console.log(`recountry: page ${stats.pages} read ${stats.read} resolvable ${stats.resolvable} written ${stats.written} after ${cursor}`);
+    if (rows.length < BACKFILL_PAGE) break;
+    await pause(BACKFILL_PAGE_PAUSE_MS);
+  }
+  console.log("RECOUNTRY_SUMMARY " + JSON.stringify({ ...stats, resume_after: cursor }));
+}
 var mode = process.argv[2];
-var run = mode === "seed" ? seed : mode === "verify" ? verify : mode === "poll" ? poll : null;
+var run = mode === "seed" ? seed : mode === "verify" ? verify : mode === "poll" ? poll : mode === "recountry" ? recountry : null;
 if (!run) {
-  console.error("usage: node dist/run.cjs <seed|poll|verify>");
+  console.error("usage: node dist/run.cjs <seed|poll|verify|recountry>");
   process.exit(1);
 }
 run().catch((e) => {

@@ -20,6 +20,13 @@
  *   state and a country and never resolve alone.
  * - Segments carrying a negation (not / except / excluding / outside / 以外 …)
  *   contribute nothing, mirroring country-evidence.ts.
+ * - Anchor-only localities (location-gazetteer-data.ts `anchorOnlyCities`)
+ *   never resolve alone and are never reported as ambiguous; they exist to
+ *   anchor a guarded or country-colliding code of their own market
+ *   ("Hawthorne, CA" → US, "Hawthorne" → nothing).
+ * - In the two-segment shape "<unknown place>, <CODE>" a word-like code that
+ *   belongs to one market and collides with no country (`shapeSafeRegionCodes`:
+ *   OR, HI, OK, OH, ON, MB, NB, ACT) resolves at medium confidence.
  * - Two anchored countries inside ONE location ("Toronto, TX") → every country
  *   is returned with `conflict: true`. Separate locations joined by ";", "|"
  *   or "/" are independent ("Toronto, ON; Austin, TX" → CA and US, no
@@ -27,11 +34,13 @@
  */
 import { explicitCountryAlias, supportedMarketCodes, type SupportedMarket } from "./country-evidence";
 import {
+  anchorOnlyCities,
   anchorRequiredCodeCountries,
   countryCollisionCodes,
   gazetteerModifiers,
   gazetteerSource,
   guardedRegionCodes,
+  shapeSafeRegionCodes,
   type GazetteerKind,
 } from "./location-gazetteer-data";
 
@@ -75,6 +84,8 @@ const cjkSuffix = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]{0,
 const negative = /\b(?:not|except|excluding|excluded|outside|sauf|hors|exclu(?:e|s|es)?)\b|以外|除外|対象外|除く|不包括|不含|बाहर/iu;
 /** Mirrors the short labels country-evidence.ts accepts; "CA" and "IN" are deliberately absent there too. */
 const shortLabels: Record<string, SupportedMarket> = { US: "US", USA: "US", UK: "GB", GB: "GB", GBR: "GB", AU: "AU", AUS: "AU", CAN: "CA", SG: "SG", SGP: "SG", JP: "JP", JPN: "JP" };
+/** A capitalised word or short phrase of letters only — what an unlisted town looks like. */
+const placeLike = /^(?!(?:[Rr]emote|[Hh]ybrid|[Oo]n-?[Ss]ite|[Vv]irtual|[Aa]nywhere|[Ff]lexible|[Hh]ome|[Ww][Ff][Hh])\b)\p{Lu}[\p{L}'’.]*(?:[\s-]\p{L}[\p{L}'’.]*){0,3}$/u;
 const unitSeparator = /[;|/\n]+/u;
 const segmentSeparator = /[,()（）、]+|\s+[-–—]+\s+/u;
 
@@ -92,6 +103,10 @@ interface Entry {
   ambiguous: boolean;
   wholeSegmentOnly: boolean;
   defaultCountry: SupportedMarket | null;
+  /** Markets that list the name only as an anchor-only locality. */
+  anchorOnlyIn: Set<SupportedMarket>;
+  /** Every reading is anchor-only: never positive alone, never ambiguous. */
+  anchorOnly: boolean;
 }
 interface CodeEntry {
   code: string;
@@ -101,6 +116,8 @@ interface CodeEntry {
   /** Also an ordinary word (OR, IN, ME …): silently ignored when unanchored. */
   wordGuarded: boolean;
   collision: { region: SupportedMarket; country: SupportedMarket } | null;
+  /** Word-like, single-market, no country collision: accepted in "<place>, CODE" shape. */
+  shapeSafe: boolean;
 }
 
 const entries = new Map<string, Entry>();
@@ -109,7 +126,7 @@ let maxTokens = 1;
 function entryFor(key: string, display: string): Entry {
   let entry = entries.get(key);
   if (!entry) {
-    entry = { key, display, tokenCount: key.split(" ").length, kinds: new Map(), nonMarket: new Set(), ambiguous: false, wholeSegmentOnly: false, defaultCountry: null };
+    entry = { key, display, tokenCount: key.split(" ").length, kinds: new Map(), nonMarket: new Set(), ambiguous: false, wholeSegmentOnly: false, defaultCountry: null, anchorOnlyIn: new Set(), anchorOnly: false };
     entries.set(key, entry);
     maxTokens = Math.max(maxTokens, entry.tokenCount);
   }
@@ -133,13 +150,25 @@ for (const country of supportedMarketCodes) {
   const guardedByCountry = anchorRequiredCodeCountries.includes(country);
   for (const code of data.regionCodes) {
     const upper = code.normalize("NFKC").toUpperCase();
-    const existing = codes.get(upper) ?? { code: upper, countries: new Set<SupportedMarket>(), guarded: false, wordGuarded: guardedRegionCodes.includes(upper), collision: null };
+    const existing = codes.get(upper) ?? { code: upper, countries: new Set<SupportedMarket>(), guarded: false, wordGuarded: guardedRegionCodes.includes(upper), collision: null, shapeSafe: false };
     existing.countries.add(country);
     existing.guarded = existing.guarded || guardedByCountry || existing.wordGuarded;
     existing.collision = countryCollisionCodes[upper] ?? null;
     codes.set(upper, existing);
   }
+  for (const item of anchorOnlyCities[country]) {
+    for (const form of item.split("|")) {
+      const key = phraseKey(form);
+      if (!key) continue;
+      const entry = entryFor(key, form.trim());
+      if (!entry.kinds.has(country)) {
+        entry.kinds.set(country, new Set(["city"]));
+        entry.anchorOnlyIn.add(country);
+      }
+    }
+  }
 }
+for (const code of codes.values()) code.shapeSafe = shapeSafeRegionCodes.includes(code.code) && code.countries.size === 1 && !code.collision;
 for (const [name, modifier] of Object.entries(gazetteerModifiers)) {
   const key = phraseKey(name);
   if (!key) continue;
@@ -153,8 +182,26 @@ for (const [name, modifier] of Object.entries(gazetteerModifiers)) {
     } else entry.nonMarket.add(code);
   }
 }
+// A multi-token anchor phrase that contains an ordinary, unambiguous place of the
+// same market ("Costa Mesa" ⊃ "Mesa", "Michigan City" ⊃ "Michigan") is an
+// ordinary place itself: the phrase must not shadow what its part already proved.
 for (const entry of entries.values()) {
-  if (entry.kinds.size + entry.nonMarket.size > 1) entry.ambiguous = true;
+  if (!entry.anchorOnlyIn.size || entry.tokenCount < 2) continue;
+  const tokens = entry.key.split(" ");
+  for (const country of [...entry.anchorOnlyIn]) {
+    let contains = false;
+    for (let length = entry.tokenCount - 1; length >= 1 && !contains; length--)
+      for (let start = 0; start + length <= tokens.length && !contains; start++) {
+        const part = entries.get(tokens.slice(start, start + length).join(" "));
+        if (part && !part.ambiguous && part.kinds.size === 1 && part.kinds.has(country) && !part.anchorOnlyIn.has(country) && part.nonMarket.size === 0) contains = true;
+      }
+    if (contains) entry.anchorOnlyIn.delete(country);
+  }
+}
+for (const entry of entries.values()) {
+  const ordinary = entry.kinds.size - entry.anchorOnlyIn.size;
+  if (ordinary + entry.nonMarket.size > 1) entry.ambiguous = true;
+  entry.anchorOnly = entry.anchorOnlyIn.size > 0 && ordinary === 0 && entry.nonMarket.size === 0 && !entry.defaultCountry;
 }
 /** Japanese-script forms, longest first, for the ward/city suffix rule. */
 const cjkKeys = [...entries.keys()].filter((key) => cjk.test(key) && !key.includes(" ")).sort((a, b) => b.length - a.length);
@@ -181,6 +228,8 @@ interface Item {
   confidence: GazetteerConfidence | null;
   /** The item's location anchored two different countries. */
   inConflict: boolean;
+  /** Anchor-only locality: can anchor a code, never resolves alone. */
+  anchorOnly: boolean;
 }
 
 const hasKind = (entry: Entry, country: SupportedMarket, ...kinds: GazetteerKind[]): boolean => kinds.some((kind) => entry.kinds.get(country)?.has(kind));
@@ -189,16 +238,17 @@ const isCityOnly = (entry: Entry): boolean => [...entry.kinds.values()].every((k
 function nameItem(entry: Entry, text: string, segment: number): Item {
   const candidates = new Set<SupportedMarket>(entry.kinds.keys());
   const regionReading = new Set<SupportedMarket>([...entry.kinds.keys()].filter((country) => hasKind(entry, country, "region")));
-  return { type: "name", text, segment, candidates, regionReading: regionReading.size ? regionReading : candidates, ambiguous: entry.ambiguous || candidates.size !== 1, cityish: isCityOnly(entry), entry, code: null, anchored: true, resolved: null, confidence: null, inConflict: false };
+  const ordinary = new Set<SupportedMarket>([...candidates].filter((country) => !entry.anchorOnlyIn.has(country)));
+  return { type: "name", text, segment, candidates, regionReading: regionReading.size ? regionReading : candidates, ambiguous: entry.ambiguous || (entry.anchorOnly ? candidates.size !== 1 : ordinary.size !== 1), cityish: isCityOnly(entry), entry, code: null, anchored: true, resolved: null, confidence: null, inConflict: false, anchorOnly: entry.anchorOnly };
 }
 function codeItem(code: CodeEntry, text: string, segment: number): Item {
   const candidates = new Set<SupportedMarket>(code.countries);
   if (code.collision) candidates.add(code.collision.country);
-  return { type: "code", text, segment, candidates, regionReading: candidates, ambiguous: candidates.size !== 1, cityish: false, entry: null, code, anchored: !code.guarded, resolved: null, confidence: null, inConflict: false };
+  return { type: "code", text, segment, candidates, regionReading: candidates, ambiguous: candidates.size !== 1, cityish: false, entry: null, code, anchored: !code.guarded, resolved: null, confidence: null, inConflict: false, anchorOnly: false };
 }
 function explicitItem(country: SupportedMarket, text: string, segment: number): Item {
   const candidates = new Set<SupportedMarket>([country]);
-  return { type: "explicit", text, segment, candidates, regionReading: candidates, ambiguous: false, cityish: false, entry: null, code: null, anchored: true, resolved: country, confidence: "high", inConflict: false };
+  return { type: "explicit", text, segment, candidates, regionReading: candidates, ambiguous: false, cityish: false, entry: null, code: null, anchored: true, resolved: country, confidence: "high", inConflict: false, anchorOnly: false };
 }
 
 /** Explicit country mentions inside a segment (whole segment, token n-grams, ISO-style short labels). */
@@ -249,7 +299,8 @@ function itemsForSegment(segment: string, segmentIndex: number): Item[] {
       index += matched.length;
       continue;
     }
-    const upper = tokens[index].text.normalize("NFKC");
+    // "D.C." / "B.C." are written with periods; the code table is period-free.
+    const upper = tokens[index].text.normalize("NFKC").replace(/\./g, "");
     const code = /^[A-Z]{2,3}$/.test(upper) ? codes.get(upper) : undefined;
     if (code) {
       const item = codeItem(code, tokens[index].text, segmentIndex);
@@ -288,9 +339,22 @@ function anchorCodes(group: Item[], unitItems: Item[]): void {
   }
 }
 
+/** A name with an ordinary reading plus anchor-only readings ("Glasgow": GB, anchor US)
+ * follows a code or explicit country of an anchor market beside it ("Glasgow, DE",
+ * "Glasgow, KY" → US) and otherwise keeps its ordinary reading ("Glasgow" → GB). */
+function settleAnchorReadings(group: Item[]): void {
+  for (const item of group) {
+    if (item.type !== "name" || !item.entry || !item.entry.anchorOnlyIn.size || item.entry.anchorOnly) continue;
+    const anchorMarkets = item.entry.anchorOnlyIn;
+    const beside = group.find((other) => other !== item && (other.type === "explicit" || (other.type === "code" && other.anchored)) && other.candidates.size === 1 && anchorMarkets.has([...other.candidates][0]));
+    if (beside) item.candidates = new Set(beside.candidates);
+    else item.candidates = new Set([...item.candidates].filter((country) => !anchorMarkets.has(country)));
+  }
+}
 function resolveGroup(group: Item[], unitItems: Item[]): boolean {
   anchorCodes(group, unitItems);
-  const anchors = group.filter((item) => !item.ambiguous && item.anchored);
+  settleAnchorReadings(group);
+  const anchors = group.filter((item) => !item.ambiguous && item.anchored && !item.anchorOnly);
   const anchorCountries = new Set<SupportedMarket>(anchors.map((item) => [...item.candidates][0]));
   const conflict = anchorCountries.size > 1;
   for (const item of anchors) {
@@ -299,7 +363,7 @@ function resolveGroup(group: Item[], unitItems: Item[]): boolean {
     item.inConflict = conflict;
   }
   if (!conflict) {
-    const open = group.filter((item) => item.ambiguous || !item.anchored);
+    const open = group.filter((item) => item.ambiguous || !item.anchored || item.anchorOnly);
     if (anchorCountries.size === 1) {
       const country = [...anchorCountries][0];
       for (const item of open) {
@@ -308,7 +372,7 @@ function resolveGroup(group: Item[], unitItems: Item[]): boolean {
       }
     } else {
       // No anchor: mutually disambiguating names ("London, Ontario", "Perth, WA", "Melbourne, Victoria").
-      const mutual = open.filter((item) => item.type !== "code" || item.anchored || item.ambiguous);
+      const mutual = open.filter((item) => (!item.anchorOnly || item.candidates.size === 1) && (item.type !== "code" || item.anchored || item.ambiguous));
       if (mutual.length >= 2) {
         const first = mutual[0];
         let intersection = new Set<SupportedMarket>(first.candidates);
@@ -349,11 +413,13 @@ export function gazetteerCountryEvidence(label: string): GazetteerCountryEvidenc
   for (const unit of label.normalize("NFKC").split(unitSeparator)) {
     const unitItems: Item[] = [];
     const groups: Item[][] = [];
+    const shape: { segment: string; items: Item[] }[] = [];
     for (const raw of unit.split(segmentSeparator)) {
       const segment = raw.trim();
       segmentIndex++;
       if (!segment || negative.test(segment)) continue;
       const items = itemsForSegment(segment, segmentIndex);
+      shape.push({ segment, items });
       if (!items.length) continue;
       const startsGroup = items.some((item) => item.type === "name" && item.cityish) || !groups.length;
       if (startsGroup) groups.push([]);
@@ -361,6 +427,18 @@ export function gazetteerCountryEvidence(label: string): GazetteerCountryEvidenc
       unitItems.push(...items);
     }
     for (const group of groups) if (resolveGroup(group, unitItems)) result.conflict = true;
+    // "<unknown place>, <CODE>": exactly two segments, the first names no known
+    // place (letters only, no remote/hybrid words), the second is one shape-safe
+    // word-like code still unanchored. Medium confidence: the code is read as
+    // the region because nothing else in the location could be meant by it.
+    if (shape.length === 2 && shape[0].items.length === 0 && shape[1].items.length === 1) {
+      const [place, code] = [shape[0], shape[1].items[0]];
+      if (code.type === "code" && code.code?.shapeSafe && !code.anchored && !code.resolved && placeLike.test(place.segment) && code.text.normalize("NFKC") === shape[1].segment.normalize("NFKC")) {
+        code.anchored = true;
+        code.resolved = [...code.candidates][0];
+        code.confidence = "medium";
+      }
+    }
     allItems.push(...unitItems);
   }
   // London rule: default only when nothing anywhere in the label points at a competing candidate.
@@ -382,7 +460,7 @@ export function gazetteerCountryEvidence(label: string): GazetteerCountryEvidenc
       if (item.code?.collision && item.resolved === item.code.collision.country) continue; // "Toronto, CA": the code was the country label
       result.matches.push({ token: item.text, country: item.resolved, kind: kindOf(item), confidence: item.confidence });
       if (!result.countries.includes(item.resolved)) result.countries.push(item.resolved);
-    } else if (item.ambiguous && (item.type === "name" || !item.code?.wordGuarded || item.code.collision)) {
+    } else if (item.ambiguous && !item.anchorOnly && (item.type === "name" || !item.code?.wordGuarded || item.code.collision)) {
       const key = normalizeToken(item.text);
       if (!seenAmbiguous.has(key)) { seenAmbiguous.add(key); result.ambiguous.push(item.text); }
     }

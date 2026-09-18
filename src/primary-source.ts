@@ -32,6 +32,10 @@ export interface SourceJob {
   url: string;
   locations: string[];
   posted_at: string | null;
+  /** How exact posted_at is: 'timestamp' (source states an instant), 'date'
+   * (source states a calendar day, stored at UTC midnight) or 'unknown'
+   * (posted_at is null — the source publishes no date; never the fetch time). */
+  posted_precision: PostedPrecision;
   updated_at: string | null;
   structuredType: string | null;
   structured_job_type: string | null;
@@ -267,6 +271,21 @@ function unzonedDate(v: unknown): string | null {
       : v,
   );
 }
+export type PostedPrecision = "timestamp" | "date" | "unknown";
+/** Precision of a source-stated publication value once normalised to ISO.
+ * A bare calendar date (Workable `published_on`), or a zone-less midnight
+ * such as USAJOBS `PublicationStartDate` ("2026-09-08T00:00:00.0000", read as
+ * UTC), states a day, not an instant. Anything else that parsed is an instant.
+ * Pinpoint publishes no date at all, so its rows stay 'unknown'. */
+export function postedPrecision(raw: unknown, iso: string | null): PostedPrecision {
+  if (iso === null) return "unknown";
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return "date";
+    if (/^\d{4}-\d{2}-\d{2}T00:00(?::00(?:\.0+)?)?$/.test(value)) return "date";
+  }
+  return "timestamp";
+}
 function identity(v: unknown): string | null {
   return typeof v === "string"
     ? v
@@ -291,9 +310,11 @@ export function employmentType(value: unknown): string | null {
         apprenticeship: "apprenticeship",
         research: "research",
         // Compound provider codes (Recruitee `employment_type_code`) and
-        // labels used by the feeds authorised 2026-09-16. Fixed-term work is
-        // a contract, seasonal/temp work is temporary, freelance is contract —
-        // the same reading as employmentTypeFromLabel in employment-evidence.
+        // labels used by the feeds authorised 2026-09-16. Owner decision
+        // (Sep 16, 2026): a fixed-term role keeps its hours commitment
+        // (full-time or part-time) so full-time searches still see it; the raw
+        // label stays on the record (structuredType) as the fixed-term flag.
+        // Seasonal/temp work is temporary, freelance is contract.
         fulltimepermanent: "full_time",
         parttimepermanent: "part_time",
         fulltimefixedterm: "full_time",
@@ -345,6 +366,8 @@ interface Extracted {
   countryFields: Field[];
   structuredType: string | null;
   posted_at: string | null;
+  /** The provider's publication value as received, for postedPrecision(). */
+  posted_raw: unknown;
   updated_at: string | null;
   listed: boolean;
   remote: RemoteFlags;
@@ -379,6 +402,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
     countryFields: [],
     structuredType: null,
     posted_at: null,
+    posted_raw: null,
     updated_at: date(j.updated_at),
     listed: true,
     remote: { workplaceType: j.workplaceType, isRemote: j.isRemote },
@@ -390,7 +414,10 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         url: text(j.absolute_url),
         description: text(j.content) !== null ? plainText(j.content) : null,
         locationFields: [{ path: "location.name", raw: object(j.location).name }],
+        // first_published is the posting time; updated_at (base) is the
+        // provider's edit time and stays separate as updated_at_source.
         posted_at: date(j.first_published),
+        posted_raw: j.first_published,
       };
     case "lever": {
       if (
@@ -422,7 +449,12 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         ],
         countryFields: [{ path: "country", raw: j.country }],
         structuredType: text(cats.commitment),
+        // createdAt is the posting time; updatedAt is the provider's edit time
+        // (263 rows were first seen before their stated posting time when the
+        // two were conflated) and is stored separately as updated_at_source.
         posted_at: date(j.createdAt),
+        posted_raw: j.createdAt,
+        updated_at: date(j.updatedAt),
       };
     }
     case "ashby":
@@ -450,6 +482,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         ],
         structuredType: text(j.employmentType),
         posted_at: date(j.publishedAt),
+        posted_raw: j.publishedAt,
         listed: j.isListed !== false,
       };
     case "recruitee": {
@@ -471,6 +504,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         ],
         structuredType: label(j.employment_type_code),
         posted_at: date(j.published_at),
+        posted_raw: j.published_at,
         remote: { isRemote: typeof j.remote === "boolean" ? j.remote : undefined },
       };
     }
@@ -491,7 +525,9 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
           ...locations.map((l, i) => ({ path: `locations[${i}].countryCode`, raw: l.countryCode })),
         ],
         structuredType: label(j.employment_type),
+        // published_on is a calendar date ("2026-02-12"): precision 'date'.
         posted_at: date(label(j.published_on)),
+        posted_raw: label(j.published_on),
         updated_at: null,
         remote: { isRemote: typeof j.telecommuting === "boolean" ? j.telecommuting : undefined },
       };
@@ -519,6 +555,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         ],
         structuredType: label(object(j.type).name) ?? label(object(j.type).id),
         posted_at: date(j.published_date),
+        posted_raw: j.published_date,
         updated_at: null,
         remote: { isRemote: typeof primary.is_remote === "boolean" ? primary.is_remote : undefined },
       };
@@ -526,8 +563,10 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
     case "pinpoint": {
       // postings.json: four HTML sections with their headers, employment_type,
       // workplace_type, `location{name,city,province}`. No publication date is
-      // documented, so posted_at stays null (first-seen stays first-seen). The
-      // location name is a country only when the source wrote a country there.
+      // documented, so posted_at stays null with precision 'unknown' (the
+      // database keeps first_seen_at as the honest "found" fallback; the fetch
+      // time is never written as a posting time). The location name is a
+      // country only when the source wrote a country there.
       const loc = object(j.location);
       const countryName = label(loc.name) && explicitCountry(loc.name) ? loc.name : null;
       return {
@@ -549,6 +588,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         ],
         structuredType: label(j.employment_type) ?? label(j.employment_type_text),
         posted_at: date(label(j.published_at)),
+        posted_raw: label(j.published_at),
         updated_at: null,
         remote: { workplaceType: j.workplace_type },
       };
@@ -566,6 +606,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         countryFields: places.map((p, i) => ({ path: `_jobposting.jobLocation[${i}].address.addressCountry`, raw: object(p.address).addressCountry })),
         structuredType: label(posting.employmentType),
         posted_at: date(j.date_published) ?? date(posting.datePosted),
+        posted_raw: date(j.date_published) !== null ? j.date_published : posting.datePosted,
         updated_at: date(j.date_modified),
         remote: { isRemote: posting.jobLocationType === "TELECOMMUTE" ? true : undefined },
       };
@@ -574,7 +615,9 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
       // Search API item: MatchedObjectId (control number) + descriptor.
       // Country comes from PositionLocation[].CountryCode (a country name);
       // the type from PositionOfferingType (internships/temporary) before
-      // PositionSchedule (full/part-time); posted_at is PublicationStartDate.
+      // PositionSchedule (full/part-time); posted_at is PublicationStartDate,
+      // which the API renders without a zone at midnight ("2026-09-08T00:00:00.0000"):
+      // read as UTC (assumption) and marked precision 'date'.
       const d = object(j.MatchedObjectDescriptor),
         details = object(object(d.UserArea).Details);
       const locations = array(d.PositionLocation).map(object);
@@ -601,6 +644,7 @@ function extract(ats: PrimaryAts, j: Record<string, any>): Extracted {
         countryFields: locations.map((l, i) => ({ path: `PositionLocation[${i}].CountryCode`, raw: l.CountryCode })),
         structuredType: typeLabels.find((v) => employmentType(v)) ?? typeLabels[0] ?? null,
         posted_at: unzonedDate(d.PublicationStartDate),
+        posted_raw: d.PublicationStartDate,
         updated_at: null,
         remote: { isRemote: details.RemoteIndicator === true ? true : undefined },
       };
@@ -670,6 +714,7 @@ function normalizeJob(ats: PrimaryAts, slug: string, raw: unknown): SourceJob {
       ),
     ],
     posted_at: x.posted_at,
+    posted_precision: postedPrecision(x.posted_raw, x.posted_at),
     updated_at: x.updated_at,
     structuredType: x.structuredType,
     structured_job_type: employmentType(x.structuredType),
@@ -803,7 +848,10 @@ export function parseBoardResponse(
 const dnsLabel = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const hostName = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 export function boardUrl(ats: PrimaryAts, slug: string, eu = false): string {
-  if (!/^[A-Za-z0-9_.-]{1,200}$/.test(slug))
+  // Ashby job-board names may contain spaces ("flock safety"); the API accepts
+  // them percent-encoded. Every other family uses a bare token.
+  const slugPattern = ats === "ashby" ? /^[A-Za-z0-9_.-](?:[A-Za-z0-9_. -]{0,198}[A-Za-z0-9_.-])?$/ : /^[A-Za-z0-9_.-]{1,200}$/;
+  if (!slugPattern.test(slug))
     throw new CollectionError("INVALID_BOARD");
   const board = encodeURIComponent(slug);
   switch (ats) {

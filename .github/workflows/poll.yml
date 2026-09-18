@@ -1,34 +1,55 @@
 name: Poll job boards
+# One scheduled run fans out into four parallel shard jobs, one per source
+# group. Each shard claims only its own sources' due boards through
+# claim_due_boards (leases), so shards never fetch the same board; the per-shard
+# concurrency group keeps two scheduled runs of the same shard from
+# overlapping. The seed refresh runs once (in the greenhouse shard) and the
+# wake-up POST once, after every shard has finished.
 on:
   schedule:
     - cron: "7,27,47 * * * *"   # ~every 20 min (GitHub adds 5-30 min jitter)
   workflow_dispatch: {}
 
-concurrency:
-  group: poll
-  cancel-in-progress: false
-
 jobs:
   poll:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [greenhouse, lever, ashby, others]
+    concurrency:
+      group: poll-${{ matrix.shard }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Refresh seed lists
+        if: matrix.shard == 'greenhouse'
         run: node dist/run.cjs seed
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      - name: Poll ATS boards
+      - name: Poll ATS boards (${{ matrix.shard }})
         run: node dist/run.cjs poll
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COLLECT_ATS_SHARD: ${{ matrix.shard }}
+          COLLECT_BOARD_CAP: "4000"
+          COLLECT_PASS_BUDGET_SECONDS: "900"
+
+  wake:
+    # Once per run, after every shard (success or failure): nudge Corvey's
+    # standing loop so research rounds see the fresh corpus.
+    needs: poll
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
       - name: Wake Corvey's standing loop
-        if: always()
         continue-on-error: true
         env:
           LOOP_URL: ${{ secrets.CORVENO_LOOP_URL }}

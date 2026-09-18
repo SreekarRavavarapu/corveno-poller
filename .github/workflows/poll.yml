@@ -11,7 +11,30 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  seed:
+    # The seed-list refresh reads corpus_listings in pages; run it alone,
+    # before the shards, so it never competes with four writers for the
+    # statement budget (the first sharded run timed it out inside the
+    # greenhouse shard and lost that shard's poll).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: poll-seed
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Refresh seed lists
+        run: node dist/run.cjs seed
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
   poll:
+    needs: seed
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -26,12 +49,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Refresh seed lists
-        if: matrix.shard == 'greenhouse'
-        run: node dist/run.cjs seed
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - name: Poll ATS boards (${{ matrix.shard }})
         run: node dist/run.cjs poll
         env:

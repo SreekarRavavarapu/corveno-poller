@@ -30344,6 +30344,7 @@ async function recountry() {
     read: 0,
     resolvable: 0,
     written: 0,
+    skippedMalformed: 0,
     bySource: {},
     byCountry: {},
     byMethod: {},
@@ -30369,6 +30370,12 @@ async function recountry() {
       if (!resolution.countries.length) {
         const reason = resolution.unresolved_reason ?? "unknown";
         stats.byUnresolved[reason] = (stats.byUnresolved[reason] ?? 0) + 1;
+        continue;
+      }
+      const malformed = !Array.isArray(row.locations) ? "locations_not_array" : resolution.countries.length > 20 ? "too_many_countries" : resolution.countries.some((code) => !/^[A-Z]{2}$/.test(code)) ? "bad_country_code" : null;
+      if (malformed) {
+        stats.skippedMalformed++;
+        console.warn(`recountry: skipped malformed row ${row.id} (${malformed}: ${resolution.countries.join(",")})`);
         continue;
       }
       source.resolvable++;

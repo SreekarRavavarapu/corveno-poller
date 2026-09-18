@@ -13,8 +13,8 @@ import {
 
 const base = { poll_interval_seconds: 1200, change_rate_ema: 0, consecutive_failures: 0 };
 
-test("unchanged polls grow ×1.5 and cap at 6 h (same table as tests/sql/board-scheduling.sql)", () => {
-  const expected = [1800, 2700, 4050, 6075, 9113, 13670, 20505, 21600, 21600];
+test("unchanged polls grow ×1.5 and cap at 1 h (same table as tests/sql/board-scheduling.sql)", () => {
+  const expected = [1800, 2700, 3600, 3600, 3600, 3600, 3600, 3600, 3600];
   let state = { ...base };
   for (const interval of expected) {
     state = { ...state, poll_interval_seconds: nextPollInterval(state, { changed: false, failed: false }) };
@@ -23,7 +23,7 @@ test("unchanged polls grow ×1.5 and cap at 6 h (same table as tests/sql/board-s
 });
 
 test("a change resets to 20 minutes from any interval", () => {
-  assert.equal(nextPollInterval({ ...base, poll_interval_seconds: 21600 }, { changed: true, failed: false }), 1200);
+  assert.equal(nextPollInterval({ ...base, poll_interval_seconds: 3600 }, { changed: true, failed: false }), 1200);
   assert.equal(nextPollInterval({ ...base, poll_interval_seconds: 1800 }, { changed: true, failed: false }), 1200);
 });
 
@@ -57,10 +57,10 @@ test("scheduleAfterPoll sets next_due_at = now + interval", () => {
   const now = Date.UTC(2026, 8, 18, 12, 0, 0);
   const next = scheduleAfterPoll({ ...base, poll_interval_seconds: 6075 }, { changed: false, failed: false }, now);
   assert.deepEqual(next, {
-    poll_interval_seconds: 9113,
+    poll_interval_seconds: 3600,
     change_rate_ema: 0,
     consecutive_failures: 0,
-    next_due_at: new Date(now + 9113 * 1000).toISOString(),
+    next_due_at: new Date(now + 3600 * 1000).toISOString(),
   });
 });
 

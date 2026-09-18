@@ -15,7 +15,7 @@
 
 export const CHANGED_INTERVAL_SECONDS = 1200;
 export const QUIET_GROWTH = 1.5;
-export const MAX_QUIET_INTERVAL_SECONDS = 21600;
+export const MAX_QUIET_INTERVAL_SECONDS = 3600; // owner decision Sep 18: quiet boards at least hourly (20260917190000)
 export const MAX_FAILURE_BACKOFF_SECONDS = 86400;
 export const CHANGE_RATE_ALPHA = 0.2;
 export const BIG_THREE = ["greenhouse", "lever", "ashby"] as const;
@@ -37,7 +37,7 @@ const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
 /** Next poll interval in seconds — same rule as public.finish_board_poll:
  *  failed    → 1200 × 2^max(consecutive_failures,1) capped at 24 h (exponent bounded at 8);
  *  changed   → 1200;
- *  unchanged → previous × 1.5 (ceil) capped at 6 h. */
+ *  unchanged → previous × 1.5 (ceil) capped at 1 h. */
 export function nextPollInterval(schedule: BoardSchedule, outcome: PollOutcome): number {
   if (outcome.failed)
     return Math.min(

@@ -943,7 +943,9 @@ async function probe(
  * Resume with COUNTRY_BACKFILL_AFTER=<resume_after from the summary>. */
 const BACKFILL_WRITE = process.env.COUNTRY_BACKFILL_WRITE === "1";
 const BACKFILL_LIMIT = Math.max(1, Number(process.env.COUNTRY_BACKFILL_LIMIT ?? 5000) || 5000);
-const BACKFILL_PAGE = Math.min(5000, Math.max(100, Number(process.env.COUNTRY_BACKFILL_PAGE ?? 2000) || 2000));
+// PostgREST returns at most 1000 rows per request; a larger page made the
+// "short page" stop condition fire after the first page (Sep 18 run).
+const BACKFILL_PAGE = Math.min(1000, Math.max(100, Number(process.env.COUNTRY_BACKFILL_PAGE ?? 1000) || 1000));
 const BACKFILL_CHUNK = 200;
 const BACKFILL_CHUNK_PAUSE_MS = 250;
 const BACKFILL_PAGE_PAUSE_MS = 1500;

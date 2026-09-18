@@ -30331,7 +30331,7 @@ async function probe(ats, slug, registryUrl) {
 }
 var BACKFILL_WRITE = process.env.COUNTRY_BACKFILL_WRITE === "1";
 var BACKFILL_LIMIT = Math.max(1, Number(process.env.COUNTRY_BACKFILL_LIMIT ?? 5e3) || 5e3);
-var BACKFILL_PAGE = Math.min(5e3, Math.max(100, Number(process.env.COUNTRY_BACKFILL_PAGE ?? 2e3) || 2e3));
+var BACKFILL_PAGE = Math.min(1e3, Math.max(100, Number(process.env.COUNTRY_BACKFILL_PAGE ?? 1e3) || 1e3));
 var BACKFILL_CHUNK = 200;
 var BACKFILL_CHUNK_PAUSE_MS = 250;
 var BACKFILL_PAGE_PAUSE_MS = 1500;
